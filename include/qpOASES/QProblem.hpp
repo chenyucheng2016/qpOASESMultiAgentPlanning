@@ -394,6 +394,31 @@ class QProblem : public QProblemB
 		virtual int_t getNZ( ) const;
 
 
+		/** Initialises an MPC QP problem with direct matrix specification.
+		 *  This function sets up the MPC structure and enables Riccati-based auxiliary QP.
+		 *	\return SUCCESSFUL_RETURN \n
+		 *			RET_INIT_FAILED \n
+		 *			RET_MPC_SETUP_FAILED \n
+		 *			RET_INVALID_ARGUMENTS */
+		returnValue initMPC(	int_t _N,                               /**< Prediction horizon. */
+								int_t _nx,                              /**< Number of states. */
+								int_t _nu,                              /**< Number of inputs. */
+								const real_t* const _A,                 /**< State transition matrix (nx x nx). */
+								const real_t* const _B,                 /**< Input matrix (nx x nu). */
+								const real_t* const _Q,                 /**< State weighting matrix (nx x nx). */
+								const real_t* const _R,                 /**< Input weighting matrix (nu x nu). */
+								SymmetricMatrix *_H,                    /**< Hessian matrix. */
+								const real_t* const _g,                 /**< Gradient vector. */
+								Matrix *_A_const,                       /**< Constraint matrix. */
+								const real_t* const _lb,                /**< Lower bounds. */
+								const real_t* const _ub,                /**< Upper bounds. */
+								const real_t* const _lbA,               /**< Lower constraint bounds. */
+								const real_t* const _ubA,               /**< Upper constraint bounds. */
+								int_t& nWSR,                            /**< Maximum working set recalculations. */
+								real_t* const cputime = 0               /**< CPU time limit. */
+								);
+
+
 		/** Returns the dual solution vector (deep copy).
 		 *	\return SUCCESSFUL_RETURN \n
 					RET_QP_NOT_SOLVED */
@@ -414,6 +439,41 @@ class QProblem : public QProblemB
 		/** Set the incoming array to true for each variable entry that is
 			in the set of free variables */
 		returnValue getFreeVariablesFlags( BooleanType* varIsFree );
+
+		/** Sets up MPC problem structure with user-provided matrices.
+		 *	\return SUCCESSFUL_RETURN \n
+		 *			RET_MPC_SETUP_FAILED \n
+		 *			RET_INVALID_ARGUMENTS */
+		returnValue setupMPCStructure(	int_t _N,                       /**< Prediction horizon. */
+										int_t _nx,                      /**< Number of states. */
+										int_t _nu,                      /**< Number of inputs. */
+										const real_t* const _A,         /**< State transition matrix. */
+										const real_t* const _B,         /**< Input matrix. */
+										const real_t* const _Q,         /**< State weighting matrix. */
+										const real_t* const _R          /**< Input weighting matrix. */
+										);
+		
+		/** Solves the discrete-time algebraic Riccati equation for LQR problem.
+		 *	\return SUCCESSFUL_RETURN \n
+		 *			RET_RICCATI_SOLVE_FAILED \n
+		 *			RET_INVALID_ARGUMENTS */
+		returnValue solveRiccatiLQR(	real_t* P_out,                  /**< Output: Riccati solution matrices. */
+										real_t* K_out                   /**< Output: Feedback gain matrices. */
+										);
+		
+		/** Sets up auxiliary QP with dynamics-only active set using Riccati solution.
+		 *	\return SUCCESSFUL_RETURN \n
+		 *			RET_MPC_AUXILIARY_SETUP_FAILED \n
+		 *			RET_INVALID_ARGUMENTS */
+		returnValue setupMPCAuxiliaryQP(	const real_t* const P,          /**< Riccati solution matrices. */
+											const real_t* const K           /**< Feedback gain matrices. */
+											);
+		
+		/** Performs O(N) block-wise TQ factorization for MPC dynamics matrix.
+		 *	\return SUCCESSFUL_RETURN \n
+		 *			RET_MPC_TQ_FACTORIZATION_FAILED \n
+		 *			RET_INVALID_ARGUMENTS */
+		returnValue setupMPCTQfactorisation();
 
 
 	/*
@@ -1017,6 +1077,24 @@ class QProblem : public QProblemB
 												const real_t* const lbA, /**< Vector of lower constraints*/
 												const real_t* const ubA  /**< Vector of upper constraints*/
 												) const;
+				
+				
+				/** MPC Riccati-based auxiliary QP functions */
+				
+				/** Detects if the QP has MPC structure by analyzing constraint and Hessian patterns.
+				 *	\return SUCCESSFUL_RETURN \n
+				 *			RET_MPC_DETECTION_FAILED \n
+				 *			RET_INVALID_ARGUMENTS */
+				returnValue detectMPCStructure();
+				
+				/** Allocates memory for MPC data structures.
+				 *	\return SUCCESSFUL_RETURN \n
+				 *			RET_MEMORY_ALLOCATION_FAILED */
+				returnValue allocateMPCMemory();
+				
+				/** Frees memory for MPC data structures.
+				 *	\return SUCCESSFUL_RETURN */
+				returnValue freeMPCMemory();
 
 
 	public:
@@ -1067,6 +1145,33 @@ class QProblem : public QProblemB
 		real_t* delta_yAC_TMP;					/**< Temporary for determineStepDirection. */
 
 		real_t* tempC;                          /**< Temporary for constraint types. */
+
+		/** MPC-specific structures and temporaries for Riccati-based auxiliary QP setup */
+		struct MPCStructure {
+			int_t N;                               /**< Prediction horizon. */
+			int_t nx;                              /**< Number of states. */
+			int_t nu;                              /**< Number of inputs. */
+			real_t* A;                             /**< State transition matrix (nx x nx). */
+			real_t* B;                             /**< Input matrix (nx x nu). */
+			real_t* Q;                             /**< State weighting matrix (nx x nx). */
+			real_t* R;                             /**< Input weighting matrix (nu x nu). */
+			BooleanType isDetected;                /**< Flag indicating if MPC structure is detected. */
+			BooleanType isInitialized;             /**< Flag indicating if MPC structure is initialized. */
+		};
+
+		MPCStructure mpcData;                   /**< MPC problem structure. */
+
+		/** Riccati equation temporaries */
+		real_t* P;                              /**< Riccati solution matrices (N*(nx*nx)). */
+		real_t* K;                              /**< Feedback gain matrices ((N-1)*(nu*nx)). */
+		real_t* riccatiTemp1;                   /**< Temporary matrix (nx x nx). */
+		real_t* riccatiTemp2;                   /**< Temporary matrix (nu x nu). */
+		real_t* riccatiTemp3;                   /**< Temporary matrix (nu x nx). */
+
+		/** TQ factorization temporaries for MPC */
+		real_t* mpcQ;                           /**< Q matrix for MPC TQ factorization. */
+		real_t* mpcT;                           /**< T matrix for MPC TQ factorization. */
+		int_t mpcSizeT;                         /**< Size of MPC T matrix. */
 };
 
 

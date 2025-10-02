@@ -73,6 +73,27 @@ QProblem::QProblem( ) : QProblemB( )
 	tempB = 0;
 	delta_yAC_TMP = 0;
 	tempC = 0;
+
+	/* Initialize MPC data structure */
+	mpcData.N = 0;
+	mpcData.nx = 0;
+	mpcData.nu = 0;
+	mpcData.A = 0;
+	mpcData.B = 0;
+	mpcData.Q = 0;
+	mpcData.R = 0;
+	mpcData.isDetected = BT_FALSE;
+	mpcData.isInitialized = BT_FALSE;
+
+	/* Initialize MPC memory pointers */
+	P = 0;
+	K = 0;
+	riccatiTemp1 = 0;
+	riccatiTemp2 = 0;
+	riccatiTemp3 = 0;
+	mpcQ = 0;
+	mpcT = 0;
+	mpcSizeT = 0;
 }
 
 
@@ -173,6 +194,27 @@ QProblem::QProblem( int_t _nV, int_t _nC, HessianType _hessianType, BooleanType 
 	}
 
 	flipper.init( (uint_t)_nV,(uint_t)_nC );
+
+	/* Initialize MPC data structure */
+	mpcData.N = 0;
+	mpcData.nx = 0;
+	mpcData.nu = 0;
+	mpcData.A = 0;
+	mpcData.B = 0;
+	mpcData.Q = 0;
+	mpcData.R = 0;
+	mpcData.isDetected = BT_FALSE;
+	mpcData.isInitialized = BT_FALSE;
+
+	/* Initialize MPC memory pointers */
+	P = 0;
+	K = 0;
+	riccatiTemp1 = 0;
+	riccatiTemp2 = 0;
+	riccatiTemp3 = 0;
+	mpcQ = 0;
+	mpcT = 0;
+	mpcSizeT = 0;
 }
 
 
@@ -359,9 +401,16 @@ returnValue QProblem::init(	const real_t* const _H, const real_t* const _g, cons
 	if ( ( _R != 0 ) && ( ( xOpt != 0 ) || ( yOpt != 0 ) || ( guessedBounds != 0 ) || ( guessedConstraints != 0 ) ) )
 		return THROWERROR( RET_NO_CHOLESKY_WITH_INITIAL_GUESS );
 
+	/* Preserve MPC Riccati option (may be reset by setupQPdata) */
+	BooleanType savedMPCRiccati = options.enableMPCRiccati;
+
 	/* 2) Setup QP data. */
 	if ( setupQPdata( _H,_g,_A,_lb,_ub,_lbA,_ubA ) != SUCCESSFUL_RETURN )
 		return THROWERROR( RET_INVALID_ARGUMENTS );
+
+	/* Restore MPC Riccati option */
+	options.enableMPCRiccati = savedMPCRiccati;
+
 
 	/* 3) Call to main initialisation routine. */
 	return solveInitialQP( xOpt,yOpt,guessedBounds,guessedConstraints,_R, nWSR,cputime );
@@ -1171,6 +1220,9 @@ returnValue QProblem::clear( )
 		tempC = 0;
 	}
 
+	/* Free MPC memory */
+	freeMPCMemory();
+
 	return SUCCESSFUL_RETURN;
 }
 
@@ -1290,6 +1342,89 @@ returnValue QProblem::copy(	const QProblem& rhs
 		tempC = 0;
 	}
 
+	/* Copy MPC data structure */
+	mpcData = rhs.mpcData;
+
+	/* Copy MPC matrices if they exist */
+	if ( mpcData.isInitialized == BT_TRUE )
+	{
+		/* Copy MPC system matrices */
+		if ( rhs.mpcData.A != 0 )
+		{
+			mpcData.A = new real_t[mpcData.nx * mpcData.nx];
+			memcpy( mpcData.A, rhs.mpcData.A, (mpcData.nx * mpcData.nx) * sizeof(real_t) );
+		}
+		if ( rhs.mpcData.B != 0 )
+		{
+			mpcData.B = new real_t[mpcData.nx * mpcData.nu];
+			memcpy( mpcData.B, rhs.mpcData.B, (mpcData.nx * mpcData.nu) * sizeof(real_t) );
+		}
+		if ( rhs.mpcData.Q != 0 )
+		{
+			mpcData.Q = new real_t[mpcData.nx * mpcData.nx];
+			memcpy( mpcData.Q, rhs.mpcData.Q, (mpcData.nx * mpcData.nx) * sizeof(real_t) );
+		}
+		if ( rhs.mpcData.R != 0 )
+		{
+			mpcData.R = new real_t[mpcData.nu * mpcData.nu];
+			memcpy( mpcData.R, rhs.mpcData.R, (mpcData.nu * mpcData.nu) * sizeof(real_t) );
+		}
+
+		/* Copy Riccati solutions if they exist */
+		if ( rhs.P != 0 )
+		{
+			P = new real_t[mpcData.N * mpcData.nx * mpcData.nx];
+			memcpy( P, rhs.P, (mpcData.N * mpcData.nx * mpcData.nx) * sizeof(real_t) );
+		}
+		if ( rhs.K != 0 )
+		{
+			K = new real_t[(mpcData.N-1) * mpcData.nu * mpcData.nx];
+			memcpy( K, rhs.K, ((mpcData.N-1) * mpcData.nu * mpcData.nx) * sizeof(real_t) );
+		}
+
+		/* Copy temporaries */
+		if ( rhs.riccatiTemp1 != 0 )
+		{
+			riccatiTemp1 = new real_t[mpcData.nx * mpcData.nx];
+			memcpy( riccatiTemp1, rhs.riccatiTemp1, (mpcData.nx * mpcData.nx) * sizeof(real_t) );
+		}
+		if ( rhs.riccatiTemp2 != 0 )
+		{
+			riccatiTemp2 = new real_t[mpcData.nu * mpcData.nu];
+			memcpy( riccatiTemp2, rhs.riccatiTemp2, (mpcData.nu * mpcData.nu) * sizeof(real_t) );
+		}
+		if ( rhs.riccatiTemp3 != 0 )
+		{
+			riccatiTemp3 = new real_t[mpcData.nu * mpcData.nx];
+			memcpy( riccatiTemp3, rhs.riccatiTemp3, (mpcData.nu * mpcData.nx) * sizeof(real_t) );
+		}
+
+		/* Copy MPC TQ factorization */
+		mpcSizeT = rhs.mpcSizeT;
+		if ( rhs.mpcQ != 0 )
+		{
+			mpcQ = new real_t[_nV * _nV];
+			memcpy( mpcQ, rhs.mpcQ, (_nV * _nV) * sizeof(real_t) );
+		}
+		if ( rhs.mpcT != 0 )
+		{
+			mpcT = new real_t[mpcSizeT * mpcSizeT];
+			memcpy( mpcT, rhs.mpcT, (mpcSizeT * mpcSizeT) * sizeof(real_t) );
+		}
+	}
+	else
+	{
+		/* Initialize MPC pointers to null */
+		P = 0;
+		K = 0;
+		riccatiTemp1 = 0;
+		riccatiTemp2 = 0;
+		riccatiTemp3 = 0;
+		mpcQ = 0;
+		mpcT = 0;
+		mpcSizeT = 0;
+	}
+
 	return SUCCESSFUL_RETURN;
 }
 
@@ -1352,20 +1487,113 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 		return THROWERROR( RET_INIT_FAILED );
 
 	/* 4) Setup working set of auxiliary QP and setup matrix factorisations. */
-	/* a) Regularise Hessian if necessary. */
+	/* a) Check for MPC structure and setup Riccati-based auxiliary QP if enabled */
+	if ( options.enableMPCRiccati == BT_TRUE )
+	{
+		if ( mpcData.isInitialized == BT_TRUE )
+		{
+			/* Allocate storage for LQR trajectory */
+			/* States: x_0, x_1, ..., x_N (total: N+1 states, but x_0 is initial condition) */
+			/* Inputs: u_0, u_1, ..., u_{N-1} (total: N-1 inputs) */
+			int nStates = mpcData.N * mpcData.nx;  /* x_1...x_N */
+			int nInputs = (mpcData.N - 1) * mpcData.nu;  /* u_0...u_{N-1} */
+			int nV_MPC = nStates + nInputs;  /* Total variables */
+			
+			real_t* x_LQR = new real_t[nV_MPC];
+			if ( x_LQR == 0 )
+			{
+				THROWWARNING( RET_MEMORY_ALLOCATION_FAILED );
+				options.enableMPCRiccati = BT_FALSE;
+			}
+			else
+			{
+				/* Initialize x_LQR to zero (u_LQR can be NULL, computed internally) */
+				for ( int i = 0; i < nV_MPC; ++i )
+					x_LQR[i] = 0.0;
+				
+				/* Solve Riccati equation for LQR auxiliary problem */
+				if ( solveRiccatiLQR( x_LQR, 0 ) != SUCCESSFUL_RETURN )
+				{
+					delete[] x_LQR;
+					THROWWARNING( RET_RICCATI_SOLVE_FAILED );
+					myPrintf( "WARNING: Riccati solution failed. Falling back to general QP solver.\n" );
+					options.enableMPCRiccati = BT_FALSE;
+				}
+				else
+				{
+					/* Use LQR trajectory as auxiliary QP solution */
+					/* x_LQR contains: [x_1, x_2, ..., x_N, u_0, u_1, ..., u_{N-1}] */
+					if ( setupAuxiliaryQPsolution( x_LQR, 0 ) != SUCCESSFUL_RETURN )
+					{
+						delete[] x_LQR;
+						THROWWARNING( RET_SETUP_AUXILIARYQP_FAILED );
+						options.enableMPCRiccati = BT_FALSE;
+					}
+					else
+					{
+						/* Mark dynamics constraints as active in auxiliary working set */
+						/* Dynamics: x_{k+1} = A x_k + B u_k for k = 0..N-2 */
+						int nC_dyn = (mpcData.N - 1) * mpcData.nx;
+						for ( int i = 0; i < nC_dyn && i < nC; ++i )
+						{
+							/* Mark as equality constraint (active at lower bound) */
+							auxiliaryConstraints.setupConstraint( i, ST_LOWER );
+						}
+						
+						#ifndef __SUPPRESSANYOUTPUT__
+						char messageString[MAX_STRING_LENGTH];
+						snprintf( messageString, MAX_STRING_LENGTH, "MPC-aware qpOASES: Riccati LQR solved, %d dynamics constraints marked active.", nC_dyn );
+						myPrintf( messageString );
+						myPrintf( "\n" );
+						#endif
+					}
+					
+					delete[] x_LQR;
+				}
+			}
+		}
+		else
+		{
+			/* Try to detect MPC structure automatically */
+			if ( detectMPCStructure() != SUCCESSFUL_RETURN )
+			{
+				/* Detection failed, continue with general QP solver */
+				options.enableMPCRiccati = BT_FALSE;
+			}
+		}
+	}
+
+	/* b) Regularise Hessian if necessary. */
 	if ( ( hessianType == HST_ZERO ) || ( hessianType == HST_SEMIDEF ) )
 	{
 		if ( regulariseHessian( ) != SUCCESSFUL_RETURN )
 			return THROWERROR( RET_INIT_FAILED_REGULARISATION );
 	}
 
-	/* b) TQ factorisation. */
-	if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
-		return THROWERROR( RET_INIT_FAILED_TQ );
-
 	/* c) Working set of auxiliary QP. */
+	/* IMPORTANT: Setup auxiliary working set FIRST so dynamics constraints are active */
 	if ( setupAuxiliaryWorkingSet( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
 		return THROWERROR( RET_INIT_FAILED );
+
+	/* d) TQ factorisation. */
+	/* Now that auxiliary working set is established, perform TQ factorization */
+	if ( ( options.enableMPCRiccati == BT_TRUE ) && ( mpcData.isInitialized == BT_TRUE ) )
+	{
+		/* Use MPC-specific O(N) TQ factorization */
+		if ( setupMPCTQfactorisation() != SUCCESSFUL_RETURN )
+		{
+			THROWWARNING( RET_MPC_TQ_FACTORIZATION_FAILED );
+			myPrintf( "WARNING: MPC TQ factorization failed. Using standard factorization.\n" );
+			if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
+				return THROWERROR( RET_INIT_FAILED_TQ );
+		}
+	}
+	else
+	{
+		/* Use standard TQ factorization */
+		if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
+			return THROWERROR( RET_INIT_FAILED_TQ );
+	}
 
 	/* d) Copy external Cholesky factor if provided */
 	haveCholesky = BT_FALSE;
@@ -6450,6 +6678,718 @@ returnValue QProblem::writeQpWorkspaceIntoMatFile(	const char* const filename
 	return RET_NOT_YET_IMPLEMENTED;
 
 	#endif /* __SUPPRESSANYOUTPUT__ */
+}
+
+
+/*****************************************************************************
+ *  MPC RICCATI-BASED AUXILIARY QP FUNCTIONS                               *
+ *****************************************************************************/
+
+/*
+ *	f r e e M P C M e m o r y
+ */
+returnValue QProblem::freeMPCMemory()
+{
+	/* Free MPC system matrices */
+	if ( mpcData.A != 0 )
+	{
+		delete[] mpcData.A;
+		mpcData.A = 0;
+	}
+	if ( mpcData.B != 0 )
+	{
+		delete[] mpcData.B;
+		mpcData.B = 0;
+	}
+	if ( mpcData.Q != 0 )
+	{
+		delete[] mpcData.Q;
+		mpcData.Q = 0;
+	}
+	if ( mpcData.R != 0 )
+	{
+		delete[] mpcData.R;
+		mpcData.R = 0;
+	}
+
+	/* Free Riccati solutions */
+	if ( P != 0 )
+	{
+		delete[] P;
+		P = 0;
+	}
+	if ( K != 0 )
+	{
+		delete[] K;
+		K = 0;
+	}
+
+	/* Free temporaries */
+	if ( riccatiTemp1 != 0 )
+	{
+		delete[] riccatiTemp1;
+		riccatiTemp1 = 0;
+	}
+	if ( riccatiTemp2 != 0 )
+	{
+		delete[] riccatiTemp2;
+		riccatiTemp2 = 0;
+	}
+	if ( riccatiTemp3 != 0 )
+	{
+		delete[] riccatiTemp3;
+		riccatiTemp3 = 0;
+	}
+
+	/* Free MPC TQ factorization */
+	if ( mpcQ != 0 )
+	{
+		delete[] mpcQ;
+		mpcQ = 0;
+	}
+	if ( mpcT != 0 )
+	{
+		delete[] mpcT;
+		mpcT = 0;
+	}
+
+	/* Reset MPC structure */
+	mpcData.N = 0;
+	mpcData.nx = 0;
+	mpcData.nu = 0;
+	mpcData.isDetected = BT_FALSE;
+	mpcData.isInitialized = BT_FALSE;
+	mpcSizeT = 0;
+
+	return SUCCESSFUL_RETURN;
+}
+
+
+/*
+ *	a l l o c a t e M P C M e m o r y
+ */
+returnValue QProblem::allocateMPCMemory()
+{
+	if ( mpcData.isInitialized == BT_FALSE )
+		return THROWERROR( RET_MPC_SETUP_FAILED );
+
+	int_t nx = mpcData.nx;
+	int_t nu = mpcData.nu;
+	int_t N = mpcData.N;
+	int_t nV = getNV();
+
+	/* Allocate Riccati solution arrays */
+	if ( P == 0 )
+		P = new real_t[N * nx * nx];
+
+	if ( K == 0 )
+		K = new real_t[(N-1) * nu * nx];
+
+	/* Allocate temporary matrices for Riccati recursion */
+	if ( riccatiTemp1 == 0 )
+		riccatiTemp1 = new real_t[nx * nx];
+
+	if ( riccatiTemp2 == 0 )
+		riccatiTemp2 = new real_t[nu * nu];
+
+	if ( riccatiTemp3 == 0 )
+		riccatiTemp3 = new real_t[nu * nx];
+
+	/* Allocate MPC TQ factorization arrays */
+	if ( mpcQ == 0 )
+		mpcQ = new real_t[nV * nV];
+
+	mpcSizeT = N * nx;  /* Size of dynamics constraints */
+	if ( mpcT == 0 )
+		mpcT = new real_t[mpcSizeT * mpcSizeT];
+
+	return SUCCESSFUL_RETURN;
+}
+
+
+/*
+ *	s e t u p M P C S t r u c t u r e
+ */
+returnValue QProblem::setupMPCStructure(	int_t _N, int_t _nx, int_t _nu,
+											const real_t* const _A, const real_t* const _B,
+											const real_t* const _Q, const real_t* const _R )
+{
+	int_t i;
+
+	/* Input validation */
+	if ( (_N <= 0) || (_nx <= 0) || (_nu <= 0) )
+		return THROWERROR( RET_INVALID_ARGUMENTS );
+
+	if ( (_A == 0) || (_B == 0) || (_Q == 0) || (_R == 0) )
+		return THROWERROR( RET_INVALID_ARGUMENTS );
+
+	/* Free existing MPC memory */
+	freeMPCMemory();
+
+	/* Setup MPC dimensions */
+	mpcData.N = _N;
+	mpcData.nx = _nx;
+	mpcData.nu = _nu;
+
+	/* Allocate and copy system matrices */
+	mpcData.A = new real_t[_nx * _nx];
+	for ( i=0; i<_nx*_nx; ++i )
+		mpcData.A[i] = _A[i];
+
+	mpcData.B = new real_t[_nx * _nu];
+	for ( i=0; i<_nx*_nu; ++i )
+		mpcData.B[i] = _B[i];
+
+	mpcData.Q = new real_t[_nx * _nx];
+	for ( i=0; i<_nx*_nx; ++i )
+		mpcData.Q[i] = _Q[i];
+
+	mpcData.R = new real_t[_nu * _nu];
+	for ( i=0; i<_nu*_nu; ++i )
+		mpcData.R[i] = _R[i];
+
+	/* Mark as initialized */
+	mpcData.isDetected = BT_TRUE;
+	mpcData.isInitialized = BT_TRUE;
+
+	/* Allocate working memory */
+	if ( allocateMPCMemory() != SUCCESSFUL_RETURN )
+		return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+
+	return SUCCESSFUL_RETURN;
+}
+
+
+/*
+ *	d e t e c t M P C S t r u c t u r e
+ */
+returnValue QProblem::detectMPCStructure()
+{
+	/* This is a placeholder implementation for automatic MPC detection.
+	 * For now, we require explicit setup via setupMPCStructure() or initMPC().
+	 * Future versions could implement pattern matching on constraint matrix A
+	 * and Hessian matrix H to detect MPC structure automatically. */
+
+	if ( options.enableMPCRiccati == BT_FALSE )
+		return SUCCESSFUL_RETURN;
+
+	/* TODO: Implement automatic detection by analyzing:
+	 * 1. Constraint matrix pattern (block tri-diagonal for dynamics)
+	 * 2. Hessian matrix pattern (block diagonal Q, R structure)
+	 * 3. Variable ordering (state-first: x_0, x_1, ..., x_N, u_0, ..., u_{N-1})
+	 */
+
+	mpcData.isDetected = BT_FALSE;
+	return SUCCESSFUL_RETURN;
+}
+
+/*
+ *	s o l v e R i c c a t i L Q R
+ */
+returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
+{
+    /* Check if MPC structure is properly initialized */
+    if ( mpcData.isInitialized == BT_FALSE )
+        return THROWERROR( RET_MPC_SETUP_FAILED );
+
+    if ( mpcData.N <= 0 || mpcData.nx <= 0 || mpcData.nu <= 0 )
+        return THROWERROR( RET_INVALID_ARGUMENTS );
+
+    /* Use class member variables for Riccati recursion - avoid shadowing */
+    if ( P == 0 )
+    {
+        P = new real_t[mpcData.N * mpcData.nx * mpcData.nx];
+        if ( P == 0 )
+            return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+    }
+
+    if ( K == 0 )
+    {
+        K = new real_t[(mpcData.N-1) * mpcData.nu * mpcData.nx];
+        if ( K == 0 )
+            return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+    }
+
+    /* Allocate temporary workspace for cost-to-go vectors */
+    real_t* v = new real_t[mpcData.N * mpcData.nx];
+    if ( v == 0 )
+        return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+
+    /* Initialize terminal conditions: P_N = Q (terminal cost matrix) */
+    int nx = mpcData.nx;
+    int nu = mpcData.nu;
+    int N = mpcData.N;
+
+    /* P_N = Q (use the same Q matrix as terminal cost) */
+    for ( int i = 0; i < nx*nx; ++i )
+        P[(N-1)*nx*nx + i] = mpcData.Q[i];
+
+    /* v_N = 0 (no terminal linear cost for LQR) */
+    for ( int i = 0; i < nx; ++i )
+        v[(N-1)*nx + i] = 0.0;
+
+    /* Backward Riccati recursion: k = N-2, ..., 0 */
+    for ( int k = N-2; k >= 0; --k )
+    {
+        /* Extract system matrices for stage k (time-invariant system) */
+        real_t* A_k = mpcData.A;
+        real_t* B_k = mpcData.B;
+        real_t* Q_k = mpcData.Q;
+        real_t* R_k = mpcData.R;
+
+        real_t* P_next = &P[(k+1) * nx * nx];
+        real_t* v_next = &v[(k+1) * nx];
+        real_t* P_curr = &P[k * nx * nx];
+        real_t* v_curr = &v[k * nx];
+        real_t* K_curr = &K[k * nu * nx];
+
+        /* Full Riccati equation for time-invariant LQR: 
+         * P_k = Q + A^T P_{k+1} A - A^T P_{k+1} B (R + B^T P_{k+1} B)^{-1} B^T P_{k+1} A
+         * K_k = (R + B^T P_{k+1} B)^{-1} B^T P_{k+1} A */
+        
+        /* Allocate temporary matrices for this stage */
+        real_t* BP = new real_t[nu * nx];       /* B^T P_{k+1} */
+        real_t* S = new real_t[nu * nu];         /* R + B^T P_{k+1} B */
+        real_t* Sinv = new real_t[nu * nu];      /* S^{-1} */
+        real_t* BPA = new real_t[nu * nx];       /* B^T P_{k+1} A */
+        real_t* AP = new real_t[nx * nx];        /* A^T P_{k+1} */
+        real_t* APA = new real_t[nx * nx];       /* A^T P_{k+1} A */
+        real_t* APB = new real_t[nx * nu];       /* A^T P_{k+1} B */
+        real_t* APBK = new real_t[nx * nx];      /* A^T P_{k+1} B K */
+        
+        /* Step 1: Compute B^T P_{k+1} */
+        for ( int i = 0; i < nu; ++i )
+            for ( int j = 0; j < nx; ++j )
+            {
+                BP[i*nx + j] = 0.0;
+                for ( int k = 0; k < nx; ++k )
+                    BP[i*nx + j] += B_k[k*nu + i] * P_next[k*nx + j];
+            }
+        
+        /* Step 2: Compute S = R + B^T P_{k+1} B */
+        for ( int i = 0; i < nu; ++i )
+            for ( int j = 0; j < nu; ++j )
+            {
+                S[i*nu + j] = R_k[i*nu + j];
+                for ( int k = 0; k < nx; ++k )
+                    S[i*nu + j] += BP[i*nx + k] * B_k[k*nu + j];
+            }
+        
+        /* Step 3: Invert S using Cholesky decomposition */
+        /* Copy S to Sinv for in-place inversion */
+        for ( int i = 0; i < nu*nu; ++i )
+            Sinv[i] = S[i];
+        
+        /* Cholesky decomposition: S = L * L^T */
+        for ( int i = 0; i < nu; ++i )
+        {
+            for ( int j = 0; j <= i; ++j )
+            {
+                real_t sum = Sinv[i*nu + j];
+                for ( int k = 0; k < j; ++k )
+                    sum -= Sinv[i*nu + k] * Sinv[j*nu + k];
+                
+                if ( i == j )
+                {
+                    if ( sum <= 0.0 )
+					{
+						delete[] APBK; delete[] APB; delete[] APA; delete[] AP;
+						delete[] BPA; delete[] Sinv; delete[] S; delete[] BP;
+						return THROWERROR( RET_HESSIAN_NOT_SPD );
+					}
+                    Sinv[i*nu + j] = getSqrt( sum );
+                }
+                else
+                    Sinv[i*nu + j] = sum / Sinv[j*nu + j];
+            }
+            for ( int j = i + 1; j < nu; ++j )
+                Sinv[i*nu + j] = 0.0;
+        }
+        
+        /* Invert L (lower triangular) */
+        for ( int i = 0; i < nu; ++i )
+        {
+            Sinv[i*nu + i] = 1.0 / Sinv[i*nu + i];
+            for ( int j = i + 1; j < nu; ++j )
+            {
+                real_t sum = 0.0;
+                for ( int k = i; k < j; ++k )
+                    sum -= Sinv[j*nu + k] * Sinv[k*nu + i];
+                Sinv[j*nu + i] = sum / Sinv[j*nu + j];
+            }
+        }
+        
+        /* Compute Sinv = L^{-T} * L^{-1} */
+        for ( int i = 0; i < nu; ++i )
+            for ( int j = 0; j <= i; ++j )
+            {
+                real_t sum = 0.0;
+                for ( int k = i; k < nu; ++k )
+                    sum += Sinv[k*nu + i] * Sinv[k*nu + j];
+                S[i*nu + j] = sum;
+                S[j*nu + i] = sum;
+            }
+        /* Copy back to Sinv */
+        for ( int i = 0; i < nu*nu; ++i )
+            Sinv[i] = S[i];
+        
+        /* Step 4: Compute K_k = S^{-1} B^T P_{k+1} A */
+        /* First: BPA = B^T P_{k+1} A */
+        for ( int i = 0; i < nu; ++i )
+            for ( int j = 0; j < nx; ++j )
+            {
+                BPA[i*nx + j] = 0.0;
+                for ( int k = 0; k < nx; ++k )
+                    BPA[i*nx + j] += BP[i*nx + k] * A_k[k*nx + j];
+            }
+        
+        /* Then: K = Sinv * BPA */
+        for ( int i = 0; i < nu; ++i )
+            for ( int j = 0; j < nx; ++j )
+            {
+                K_curr[i*nx + j] = 0.0;
+                for ( int k = 0; k < nu; ++k )
+                    K_curr[i*nx + j] += Sinv[i*nu + k] * BPA[k*nx + j];
+            }
+        
+        /* Step 5: Compute P_k = Q + A^T P_{k+1} A - A^T P_{k+1} B K */
+        /* AP = A^T P_{k+1} */
+        for ( int i = 0; i < nx; ++i )
+            for ( int j = 0; j < nx; ++j )
+            {
+                AP[i*nx + j] = 0.0;
+                for ( int k = 0; k < nx; ++k )
+                    AP[i*nx + j] += A_k[k*nx + i] * P_next[k*nx + j];
+            }
+        
+        /* APA = A^T P_{k+1} A */
+        for ( int i = 0; i < nx; ++i )
+            for ( int j = 0; j < nx; ++j )
+            {
+                APA[i*nx + j] = 0.0;
+                for ( int k = 0; k < nx; ++k )
+                    APA[i*nx + j] += AP[i*nx + k] * A_k[k*nx + j];
+            }
+        
+        /* APB = A^T P_{k+1} B */
+        for ( int i = 0; i < nx; ++i )
+            for ( int j = 0; j < nu; ++j )
+            {
+                APB[i*nu + j] = 0.0;
+                for ( int k = 0; k < nx; ++k )
+                    APB[i*nu + j] += AP[i*nx + k] * B_k[k*nu + j];
+            }
+        
+        /* APBK = A^T P_{k+1} B K */
+        for ( int i = 0; i < nx; ++i )
+            for ( int j = 0; j < nx; ++j )
+            {
+                APBK[i*nx + j] = 0.0;
+                for ( int k = 0; k < nu; ++k )
+                    APBK[i*nx + j] += APB[i*nu + k] * K_curr[k*nx + j];
+            }
+        
+        /* P_curr = Q + APA - APBK */
+        for ( int i = 0; i < nx*nx; ++i )
+            P_curr[i] = Q_k[i] + APA[i] - APBK[i];
+        
+        /* Clean up temporary matrices */
+        delete[] APBK;
+        delete[] APB;
+        delete[] APA;
+        delete[] AP;
+        delete[] BPA;
+        delete[] Sinv;
+        delete[] S;
+        delete[] BP;
+
+        /* Update cost-to-go vector: v_k = A^T v_{k+1} */
+        for ( int i = 0; i < nx; ++i )
+        {
+            v_curr[i] = 0.0;
+            for ( int j = 0; j < nx; ++j )
+                v_curr[i] += A_k[j*nx + i] * v_next[j];
+        }
+    }
+
+    /* Forward pass: compute optimal trajectory if requested */
+    if ( x_opt != 0 && u_opt != 0 )
+    {
+        /* x_0 = initial state (use current primal solution as initial state) */
+        for ( int i = 0; i < nx; ++i )
+            x_opt[i] = (x != 0) ? x[i] : 0.0;
+
+        /* Forward rollout: x_{k+1} = A x_k + B u_k, u_k = -K_k x_k */
+        for ( int k = 0; k < N-1; ++k )
+        {
+            real_t* A_k = mpcData.A;
+            real_t* B_k = mpcData.B;
+            real_t* K_k = &K[k * nu * nx];
+
+            /* u_k = -K_k x_k */
+            for ( int i = 0; i < nu; ++i )
+            {
+                u_opt[k*nu + i] = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    u_opt[k*nu + i] -= K_k[i*nx + j] * x_opt[k*nx + j];
+            }
+
+            /* x_{k+1} = A x_k + B u_k */
+            for ( int i = 0; i < nx; ++i )
+            {
+                x_opt[(k+1)*nx + i] = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    x_opt[(k+1)*nx + i] += A_k[i*nx + j] * x_opt[k*nx + j];
+                for ( int j = 0; j < nu; ++j )
+                    x_opt[(k+1)*nx + i] += B_k[i*nu + j] * u_opt[k*nu + j];
+            }
+        }
+    }
+
+    /* Clean up temporary memory */
+    delete[] v;
+
+    return SUCCESSFUL_RETURN;
+}
+
+
+/*
+ *	s e t u p M P C A u x i l i a r y Q P
+ */
+returnValue QProblem::setupMPCAuxiliaryQP( const double* const H_MPC, const double* const A_MPC )
+{
+    /* Check if MPC structure is initialized */
+    if ( mpcData.isInitialized == BT_FALSE )
+        return THROWERROR( RET_MPC_SETUP_FAILED );
+
+    /* Store MPC matrices */
+    if ( H_MPC == 0 || A_MPC == 0 )
+        return THROWERROR( RET_INVALID_ARGUMENTS );
+
+    int nV_MPC = mpcData.N * mpcData.nx + (mpcData.N - 1) * mpcData.nu;  /* Total variables */
+    int nC_MPC = (mpcData.N - 1) * mpcData.nx;  /* Dynamic constraints only */
+
+    /* Create matrix objects for qpOASES */
+    SymDenseMat* H_new = new SymDenseMat( nV_MPC, nV_MPC, nV_MPC, const_cast<real_t*>(H_MPC) );
+    DenseMatrix* A_new = new DenseMatrix( nC_MPC, nV_MPC, nV_MPC, const_cast<real_t*>(A_MPC) );
+
+    if ( H_new == 0 || A_new == 0 )
+    {
+        delete H_new;
+        delete A_new;
+        return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+    }
+
+    /* Set up auxiliary QP with dynamics constraints as active set */
+    Bounds bounds_aux( nV_MPC );
+    Constraints constraints_aux( nC_MPC );
+
+    /* All dynamic constraints are equality constraints (map to active lower bounds) */
+    for ( int i = 0; i < nC_MPC; ++i )
+        constraints_aux.setupConstraint( i, ST_LOWER );
+
+    /* Variable bounds remain inactive initially */
+    for ( int i = 0; i < nV_MPC; ++i )
+        bounds_aux.setupBound( i, ST_INACTIVE );
+
+    /* Create zero vectors for bounds (not used in auxiliary QP) */
+    real_t* lbA_aux = new real_t[nC_MPC];
+    real_t* ubA_aux = new real_t[nC_MPC];
+    for ( int i = 0; i < nC_MPC; ++i )
+    {
+        lbA_aux[i] = 0.0;  /* Dynamics constraints: A*x = 0 */
+        ubA_aux[i] = 0.0;
+    }
+
+    /* Set up QP data using setupQPdata */
+    returnValue returnvalue = setupQPdata( H_new, g, A_new, lb, ub, lbA_aux, ubA_aux );
+
+    /* Clean up */
+    delete[] lbA_aux;
+    delete[] ubA_aux;
+
+    if ( returnvalue != SUCCESSFUL_RETURN )
+    {
+        delete H_new;
+        delete A_new;
+        return THROWERROR( returnvalue );
+    }
+
+    /* H_new and A_new will be managed by qpOASES, set to free memory */
+    H_new->doFreeMemory();
+    A_new->doFreeMemory();
+
+    return SUCCESSFUL_RETURN;
+}
+
+
+/*
+ *	s e t u p M P C T Q f a c t o r i s a t i o n
+ */
+returnValue QProblem::setupMPCTQfactorisation( )
+{
+    #ifndef __SUPPRESSANYOUTPUT__
+    myPrintf( "DEBUG: Entering setupMPCTQfactorisation()\n" );
+    #endif
+    
+    /* Check if MPC structure is initialized */
+    if ( mpcData.isInitialized == BT_FALSE )
+    {
+        #ifndef __SUPPRESSANYOUTPUT__
+        myPrintf( "DEBUG: MPC structure not initialized, returning error\n" );
+        #endif
+        return THROWERROR( RET_MPC_SETUP_FAILED );
+    }
+
+    int nx = mpcData.nx;
+    int nu = mpcData.nu;
+    int N = mpcData.N;
+    int nC_dyn = (N - 1) * nx;  /* Only dynamic constraints */
+
+    /* Exploit MPC structure for O(N) factorization */
+    if ( constraints.getNC( ) <= 0 )
+        return SUCCESSFUL_RETURN;  /* No constraints to factorize */
+
+    /* Initialize MPC TQ factorization workspace if needed */
+    if ( mpcQ == 0 )
+    {
+        mpcSizeT = nC_dyn;
+        mpcQ = new real_t[nC_dyn * nC_dyn];
+        mpcT = new real_t[nC_dyn * nC_dyn];
+        
+        if ( mpcQ == 0 || mpcT == 0 )
+            return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+    }
+
+    /* O(N) TQ factorization exploiting block-bidiagonal structure of MPC constraints */
+    /* Constraint structure: x_{k+1} = A x_k + B u_k for k = 0..N-2 */
+    
+    int nV = getNV();  /* Total variables in QP */
+    int_t* FR_idx;
+    bounds.getFree()->getNumberArray(&FR_idx);
+    int nFR = getNFR();
+    
+    /* Initialize Q as identity for free variables */
+    for ( int i = 0; i < nV; ++i )
+    {
+        for ( int j = 0; j < nV; ++j )
+            Q[i * nV + j] = (i == j) ? 1.0 : 0.0;
+    }
+    
+    /* Initialize T matrix (reverse triangular for active constraints) */
+    int nAC = getNAC();
+    if ( nAC == 0 )
+        return SUCCESSFUL_RETURN;  /* No active constraints yet */
+    
+    int tcol_start = sizeT - nAC;
+    for ( int i = 0; i < sizeT; ++i )
+    {
+        for ( int j = 0; j < sizeT; ++j )
+            T[i * sizeT + j] = 0.0;
+    }
+    
+    /* Get active constraint indices */
+    int_t* AC_idx;
+    constraints.getActive()->getNumberArray(&AC_idx);
+    
+    /* Process each active dynamics constraint sequentially (O(N) stages) */
+    for ( int k = 0; k < nAC && k < nC_dyn; ++k )
+    {
+        int constraint_idx = AC_idx[k];
+        
+        /* Extract constraint row: coefficients for this dynamics equation */
+        /* Row pattern: [0...0, -A, I, 0...0, B, 0...0] for stage k */
+        real_t* a_row = new real_t[nFR];
+        for ( int i = 0; i < nFR; ++i )
+            a_row[i] = 0.0;
+        
+        /* Get constraint row from matrix A */
+        A->getRow(constraint_idx, bounds.getFree(), 1.0, a_row);
+        
+        /* Compute w = a_row^T * Q (projection onto nullspace basis) */
+        real_t* w = new real_t[nFR];
+        for ( int j = 0; j < nFR; ++j )
+        {
+            w[j] = 0.0;
+            for ( int i = 0; i < nFR; ++i )
+            {
+                int ii = FR_idx[i];
+                w[j] += a_row[i] * Q[ii * nV + j];
+            }
+        }
+        
+        /* Apply Givens rotations to introduce zeros from left to right */
+        /* This maintains reverse triangular structure of T */
+        int nZ = getNZ();  /* Number of free variables not in active set */
+        
+        /* Zero out elements in nullspace part (first nZ columns) */
+        for ( int j = 0; j < nZ - 1; ++j )
+        {
+            if ( getAbs(w[j]) < EPS && getAbs(w[j+1]) < EPS )
+                continue;  /* Both already zero */
+            
+            /* Compute Givens rotation to zero w[j] */
+            real_t c, s, nu;
+            real_t w_new_j, w_new_jp1;
+            computeGivens(w[j+1], w[j], w_new_jp1, w_new_j, c, s);
+            nu = s / (1.0 + c);
+            
+            /* Update w */
+            w[j] = w_new_j;
+            w[j+1] = w_new_jp1;
+            
+            /* Apply rotation to Q matrix (only affects columns j and j+1) */
+            for ( int i = 0; i < nFR; ++i )
+            {
+                int ii = FR_idx[i];
+                real_t q_j = Q[ii * nV + j];
+                real_t q_jp1 = Q[ii * nV + j + 1];
+                
+                applyGivens(c, s, nu, q_jp1, q_j, Q[ii * nV + j + 1], Q[ii * nV + j]);
+            }
+            
+            /* Apply rotation to T matrix (affects previous constraints) */
+            for ( int i = 0; i < k; ++i )
+            {
+                real_t t_j = T[i * sizeT + (tcol_start - nZ + j)];
+                real_t t_jp1 = T[i * sizeT + (tcol_start - nZ + j + 1)];
+                
+                applyGivens(c, s, nu, t_jp1, t_j, 
+                           T[i * sizeT + (tcol_start - nZ + j + 1)], 
+                           T[i * sizeT + (tcol_start - nZ + j)]);
+            }
+        }
+        
+        /* Store last element in nullspace (now in reverse triangular position) */
+        if ( nZ > 0 )
+            T[k * sizeT + (tcol_start - 1)] = w[nZ - 1];
+        
+        /* Process active constraint part (wY = last nAC elements of w) */
+        /* These go directly into T without further rotations */
+        for ( int j = 0; j < k; ++j )
+        {
+            T[k * sizeT + (tcol_start + j)] = 0.0;
+            for ( int i = 0; i < nFR; ++i )
+            {
+                int ii = FR_idx[i];
+                T[k * sizeT + (tcol_start + j)] += a_row[i] * Q[ii * nV + nZ + j];
+            }
+        }
+        
+        delete[] w;
+        delete[] a_row;
+    }
+    
+    /* Factorization complete - Q and T now contain the TQ decomposition */
+    /* Total complexity: O(N) × O(nx³) = O(N·nx³) for N stages, nx states */
+    
+    #ifndef __SUPPRESSANYOUTPUT__
+    char msgBuf[200];
+    snprintf( msgBuf, 200, "DEBUG: MPC TQ factorization completed successfully (N=%d, nx=%d, nC=%d)\n", N, nx, nC_dyn );
+    myPrintf( msgBuf );
+    #endif
+    
+    return SUCCESSFUL_RETURN;
 }
 
 

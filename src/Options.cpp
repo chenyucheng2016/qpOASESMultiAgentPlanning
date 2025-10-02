@@ -107,6 +107,7 @@ returnValue Options::setToDefault( )
 	enableDriftCorrection         =  1;
 	enableCholeskyRefactorisation =  0;
 	enableEqualities              =  BT_FALSE;
+	enableMPCRiccati              =  BT_FALSE;
 
 	#ifdef __USE_SINGLE_PRECISION__
 	terminationTolerance          =  1.0e2 * EPS;
@@ -521,6 +522,7 @@ returnValue Options::copy(	const Options& rhs
 	enableDriftCorrection         =  rhs.enableDriftCorrection;
 	enableCholeskyRefactorisation =  rhs.enableCholeskyRefactorisation;
 	enableEqualities              =  rhs.enableEqualities;
+	enableMPCRiccati              =  rhs.enableMPCRiccati;
 
 	terminationTolerance          =  rhs.terminationTolerance;
 	boundTolerance                =  rhs.boundTolerance;

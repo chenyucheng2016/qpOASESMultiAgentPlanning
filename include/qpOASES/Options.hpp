@@ -130,6 +130,7 @@ class Options
 		int_t enableDriftCorrection;			/**< Specifies the frequency of drift corrections (0 = off). */
 		int_t enableCholeskyRefactorisation;	/**< Specifies the frequency of full refactorisation of proj. Hessian (otherwise updates). */
 		BooleanType enableEqualities;			/**< Specifies whether equalities shall be always treated as active constraints. */
+		BooleanType enableMPCRiccati;			/**< Specifies whether MPC Riccati recursion shall be used for auxiliary QP setup. */
 
 		real_t terminationTolerance;			/**< Termination tolerance. */
 		real_t boundTolerance;					/**< Lower/upper (constraints') bound tolerance (an inequality constraint whose lower and

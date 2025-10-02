@@ -222,6 +222,11 @@ RET_KKT_MATRIX_SINGULAR,						/**< KKT matrix is singular. */
 RET_QR_FACTORISATION_FAILED,					/**< QR factorization of Schur complement failed. */
 RET_INERTIA_CORRECTION_FAILED,					/**< Inertia correction failed after KKT matrix had too many negative eigenvalues. */
 RET_NO_SPARSE_SOLVER,							/**< No factorization routine for the KKT matrix installed. */
+/* MPC-aware qpOASES */
+RET_MPC_SETUP_FAILED,							/**< MPC structure setup failed. */
+RET_RICCATI_SOLVE_FAILED,						/**< Riccati recursion failed. */
+RET_MPC_TQ_FACTORIZATION_FAILED,				/**< MPC-aware TQ factorization failed. */
+RET_MEMORY_ALLOCATION_FAILED,					/**< Memory allocation failed. */
 /* Simple exitflags */
 RET_SIMPLE_STATUS_P1,							/**< QP problem could not be solved within given number of iterations. */
 RET_SIMPLE_STATUS_P0,							/**< QP problem solved. */

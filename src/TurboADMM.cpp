@@ -1251,17 +1251,28 @@ returnValue TurboADMM::solveColdStart(
                 real_t* H = new real_t[agent.nV * agent.nV];
                 memset(H, 0, agent.nV * agent.nV * sizeof(real_t));
                 
-                // Build diagonal Hessian (tracking cost only)
-                // ADMM augmentation should NOT be added unconditionally - it creates
-                // mismatch with gradient for independent agents (causes 50% tracking)
+                // Build diagonal Hessian (tracking cost + ADMM augmentation)
+                // ADMM augmentation: Add ρI ONLY to POSITION variables (x, y)
+                // This avoids the 50% tracking bug (which was caused by unconditional augmentation)
                 int idx = 0;
                 for (int k = 0; k <= agent.N; ++k) {
-                    // State cost Q (no ADMM augmentation)
+                    // State cost Q + ADMM augmentation for position
+                    // Uniform stage weights: 50% for all stages (including terminal)
+                    real_t stage_weight = 0.5;  // 50% for all stages
+                    
                     for (int j = 0; j < agent.nx; ++j) {
-                        H[idx * agent.nV + idx] = agent.Q_diag[j];
+                        // Apply stage-dependent weight to tracking cost
+                        H[idx * agent.nV + idx] = stage_weight * agent.Q_diag[j];
+                        
+                        // Add ADMM augmentation ONLY for position states (j < 2 for 2D: x, y)
+                        // Skip k=0 (initial state is fixed by bounds)
+                        // Only add if agent has neighbors (collision coupling)
+                        if (k > 0 && j < 2 && num_neighbors_i > 0) {
+                            H[idx * agent.nV + idx] += params_.rho * num_neighbors_i;
+                        }
                         idx++;
                     }
-                    // Control cost R
+                    // Control cost R (no ADMM augmentation)
                     if (k < agent.N) {
                         for (int j = 0; j < agent.nu; ++j) {
                             H[idx * agent.nV + idx] = agent.R_diag[j];
@@ -1418,6 +1429,14 @@ returnValue TurboADMM::solveColdStart(
                 // Reset QProblem before init (it was used for Riccati)
                 agent_solvers_[i]->reset();
                 
+                // DIAGNOSTIC: Check QProblem internal state before init
+                if (i == 1 && admm_iter == 1) {
+                    printf("\n[QProblem STATE CHECK] Before Agent 1 init:\n");
+                    printf("  Agent 0 z_local terminal: (%.2f, %.2f)\n",
+                           z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 0],
+                           z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 1]);
+                }
+                
                 ret = agent_solvers_[i]->init(
                     H, g, A_constraint,
                     lb_local, ub_local,  // Use local bounds with fixed x0
@@ -1425,8 +1444,27 @@ returnValue TurboADMM::solveColdStart(
                     nWSR
                 );
                 
+                // DIAGNOSTIC: Check if Agent 0's z_local was corrupted by Agent 1's init
+                if (i == 1 && admm_iter == 1) {
+                    printf("\n[QProblem STATE CHECK] After Agent 1 init:\n");
+                    printf("  Agent 0 z_local terminal: (%.2f, %.2f)\n",
+                           z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 0],
+                           z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 1]);
+                }
+                
                 printf("[DEBUG] Agent %d: QP init returned %d, nWSR=%d\n", i, ret, nWSR);
                 printf("[DEBUG AFTER QP] Agent %d: z_local[0]=(%.4f, %.4f)\n", i, z_local_[i][0], z_local_[i][1]);
+                
+                // ITERATION TRACKER: Print Agent 0 trajectory after QP solve
+                if (i == 0) {
+                    printf("\n[ITER %d] Agent 0 trajectory AFTER QP solve:\n", admm_iter);
+                    printf("  k=0:  pos=(%.2f, %.2f)\n", z_local_[0][0], z_local_[0][1]);
+                    int idx_mid = 5 * (agent.nx + agent.nu);
+                    printf("  k=5:  pos=(%.2f, %.2f)\n", z_local_[0][idx_mid + 0], z_local_[0][idx_mid + 1]);
+                    int idx_term = agent.N * (agent.nx + agent.nu);
+                    printf("  k=10: pos=(%.2f, %.2f) [target: (15.0, 5.0)]\n", 
+                           z_local_[0][idx_term + 0], z_local_[0][idx_term + 1]);
+                }
                 
                 // Additional diagnostic for first iteration
                 static int qp_call_count = 0;
@@ -1485,8 +1523,39 @@ returnValue TurboADMM::solveColdStart(
                 return ret;
             }
             
+            // DIAGNOSTIC: Check what QProblem thinks the solution is
+            if (i == 0 && admm_iter == 1) {
+                printf("\n[BEFORE getPrimalSolution] Agent 0, admm_iter=1:\n");
+                printf("  Current z_local[0] terminal: (%.2f, %.2f)\n",
+                       z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 0],
+                       z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 1]);
+            }
+            
             // Extract solution
             agent_solvers_[i]->getPrimalSolution(z_local_[i]);
+            
+            // DIAGNOSTIC: Check what was extracted
+            if (i == 0 && admm_iter == 1) {
+                printf("\n[AFTER getPrimalSolution] Agent 0, admm_iter=1:\n");
+                printf("  New z_local[0] terminal: (%.2f, %.2f)\n",
+                       z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 0],
+                       z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 1]);
+            }
+            
+            // MEMORY BOUNDARY CHECK: Verify no corruption after getPrimalSolution
+            if (i == 1 && admm_iter == 1) {
+                // After Agent 1's QP, check if Agent 0's solution is still intact
+                int idx_term_0 = agents_[0].N * (agents_[0].nx + agents_[0].nu);
+                printf("\n[MEMORY CHECK] After Agent 1 getPrimalSolution:\n");
+                printf("  Agent 0 terminal state: (%.2f, %.2f)\n", 
+                       z_local_[0][idx_term_0 + 0], z_local_[0][idx_term_0 + 1]);
+                printf("  z_local_[0] pointer: %p\n", (void*)z_local_[0]);
+                printf("  z_local_[1] pointer: %p\n", (void*)z_local_[1]);
+                printf("  Pointer difference: %ld bytes\n", 
+                       (long)((char*)z_local_[1] - (char*)z_local_[0]));
+                printf("  Agent 0 nV: %d, Agent 1 nV: %d\n", agents_[0].nV, agents_[1].nV);
+            }
+            
             stats_.total_qp_iterations += nWSR;
             
             // Debug: print full QP solution trajectory for first ADMM iteration
@@ -1574,6 +1643,19 @@ returnValue TurboADMM::solveColdStart(
         if (ret != SUCCESSFUL_RETURN)
             return ret;
         
+        // ITERATION TRACKER: Print Agent 0 trajectory AFTER projection
+        if (admm_iter < 5) {  // Only first 5 iterations
+            printf("\n[ITER %d] Agent 0 trajectory AFTER projection:\n", admm_iter);
+            printf("  k=0:  pos=(%.2f, %.2f)\n", z_local_[0][0], z_local_[0][1]);
+            int idx_mid = 5 * (agents_[0].nx + agents_[0].nu);
+            printf("  k=5:  pos=(%.2f, %.2f)\n", z_local_[0][idx_mid + 0], z_local_[0][idx_mid + 1]);
+            int idx_term = agents_[0].N * (agents_[0].nx + agents_[0].nu);
+            printf("  k=10: pos=(%.2f, %.2f) [target: (15.0, 5.0)]\n", 
+                   z_local_[0][idx_term + 0], z_local_[0][idx_term + 1]);
+            printf("  v_collision[0][1][10] = (%.2f, %.2f)\n",
+                   v_collision_[0][1][agents_[0].N][0], v_collision_[0][1][agents_[0].N][1]);
+        }
+        
         // Step 2.3: Update collision dual variables
         ret = updateCollisionDuals();
         if (ret != SUCCESSFUL_RETURN)
@@ -1630,23 +1712,28 @@ returnValue TurboADMM::computeTrackingGradient(int agent_id, real_t* g_out)
     
     // Stages k = 0 to N-1: [x_k, u_k]
     for (int k = 0; k < agent.N; ++k) {
+        // Apply uniform weight (must match Hessian!)
+        // All stages: 50%
+        real_t stage_weight = 0.5;  // All stages
+        
         // State x_k
         for (int i = 0; i < agent.nx; ++i) {
             real_t diff = 0.0 - agent.x_ref[k * agent.nx + i];
-            g_out[idx++] = agent.Q_diag[i] * diff;
+            g_out[idx++] = stage_weight * agent.Q_diag[i] * diff;
         }
         
         // Control u_k (all N controls)
         for (int i = 0; i < agent.nu; ++i) {
             real_t diff = 0.0 - agent.u_ref[k * agent.nu + i];
-            g_out[idx++] = agent.R_diag[i] * diff;
+            g_out[idx++] = agent.R_diag[i] * diff;  // No stage weight for control
         }
     }
     
-    // Terminal state x_N
+    // Terminal state x_N (50% weight, same as all stages)
+    real_t terminal_weight = 0.5;
     for (int i = 0; i < agent.nx; ++i) {
         real_t diff = 0.0 - agent.x_ref[agent.N * agent.nx + i];
-        g_out[idx++] = agent.Q_diag[i] * diff;
+        g_out[idx++] = terminal_weight * agent.Q_diag[i] * diff;
     }
     
     // Debug: Print gradient and reference for first agent
@@ -1657,12 +1744,21 @@ returnValue TurboADMM::computeTrackingGradient(int agent_id, real_t* g_out)
         printf("  x_ref[N] = (%.4f, %.4f)\n", 
                agent.x_ref[agent.N * agent.nx + 0], 
                agent.x_ref[agent.N * agent.nx + 1]);
-        printf("  g[0] (state) = %.4f (Q=%.1f, diff=%.4f)\n", 
-               g_out[0], agent.Q_diag[0], 0.0 - agent.x_ref[0]);
-        printf("  g[terminal] = %.4f (Q=%.1f, diff=%.4f)\n",
+        printf("  g[0] x-component = %.4f (Q=%.1f, x_ref=%.4f)\n", 
+               g_out[0], agent.Q_diag[0], agent.x_ref[0]);
+        printf("  g[0] y-component = %.4f (Q=%.1f, y_ref=%.4f)\n", 
+               g_out[1], agent.Q_diag[1], agent.x_ref[1]);
+        printf("  g[terminal] x = %.4f (Q=%.1f, x_ref=%.4f)\n",
                g_out[agent.N * (agent.nx + agent.nu)], 
                agent.Q_diag[0], 
-               0.0 - agent.x_ref[agent.N * agent.nx + 0]);
+               agent.x_ref[agent.N * agent.nx + 0]);
+        printf("  g[terminal] y = %.4f (Q=%.1f, y_ref=%.4f)\n",
+               g_out[agent.N * (agent.nx + agent.nu) + 1], 
+               agent.Q_diag[1], 
+               agent.x_ref[agent.N * agent.nx + 1]);
+        printf("  INTERPRETATION: Negative g pulls toward POSITIVE values\n");
+        printf("  Agent %d y_ref=%.1f, g_y=%.1f -> pulls toward y=%.1f\n",
+               agent_id, agent.x_ref[1], g_out[1], agent.x_ref[1]);
         grad_print_count++;
     }
     
@@ -1813,11 +1909,11 @@ BooleanType TurboADMM::checkConvergence(real_t* r_primal_out, real_t* r_dual_out
                 // Get state index in z_local
                 int idx_i = (k == agent_i.N) ? agent_i.N * (nx + nu) : k * (nx + nu);
                 
-                // Compute primal residual for POSITION ONLY (state[0])
-                // Collision avoidance is based on position, not velocity
-                real_t pos_i = z_local_[i][idx_i + 0];
-                real_t v_pos_i = v_collision_[i][j][k][0];
-                real_t r_primal_ijk = fabs(pos_i - v_pos_i);
+                // Compute primal residual for POSITION (2D Euclidean distance)
+                // Collision avoidance is based on 2D position (x, y), not just x
+                real_t dx = z_local_[i][idx_i + 0] - v_collision_[i][j][k][0];
+                real_t dy = z_local_[i][idx_i + 1] - v_collision_[i][j][k][1];
+                real_t r_primal_ijk = sqrt(dx*dx + dy*dy);
                 
                 // Debug: print residual for all stages in first check
                 static int print_count = 0;
@@ -1905,41 +2001,62 @@ returnValue TurboADMM::addCollisionCouplingGradient(int agent_i, real_t* g)
             
             // Get neighbor j's position at stage k (current linearization point)
             int idx_j = (k == agent_j_data.N) ? (agent_j_data.N * (agent_j_data.nx + agent_j_data.nu)) : (k * (agent_j_data.nx + agent_j_data.nu));
-            real_t pos_i_current = z_local_[agent_i][idx_g + 0];
-            real_t pos_j_current = z_local_[j][idx_j + 0];
-            real_t dist_current = fabs(pos_i_current - pos_j_current);
             
-            // Part 1: ADMM dual terms (ρ*vᵢⱼₖ - λᵢⱼₖ)
-            // This enforces collision constraint via dual variables and projection
-            real_t admm_dual_term = params_.rho * v_collision_[agent_i][j][k][0] 
-                                   - lambda_collision_[agent_i][j][k][0];
+            // 2D position for both agents (x, y)
+            real_t x_i = z_local_[agent_i][idx_g + 0];
+            real_t y_i = z_local_[agent_i][idx_g + 1];
+            real_t x_j = z_local_[j][idx_j + 0];
+            real_t y_j = z_local_[j][idx_j + 1];
             
-            // Part 2: Linearized barrier collision cost gradient
+            // 2D Euclidean distance
+            real_t dx = x_i - x_j;
+            real_t dy = y_i - y_j;
+            real_t dist_current = sqrt(dx*dx + dy*dy);
+            
+            // Part 1: ADMM dual terms (-ρ*vᵢⱼₖ + λᵢⱼₖ) for both x and y
+            // CORRECT ADMM formulation: g_augmented = g_tracking - ρ*(z - v) + λ
+            // Expanding: g_augmented = g_tracking - ρ*z + ρ*v + λ
+            // The -ρ*z term is handled by Hessian augmentation (H += ρI)
+            // So gradient gets: -ρ*v + λ
+            real_t admm_dual_term_x = -params_.rho * v_collision_[agent_i][j][k][0] 
+                                     + lambda_collision_[agent_i][j][k][0];
+            real_t admm_dual_term_y = -params_.rho * v_collision_[agent_i][j][k][1] 
+                                     + lambda_collision_[agent_i][j][k][1];
+            
+            // Part 2: Linearized barrier collision cost gradient (2D)
             // Cost: (ρ_collision/2) * max(0, d_safe - dist)²
             // Only add gradient when collision is violated (dist < d_safe)
-            real_t collision_cost_gradient = 0.0;
+            real_t collision_cost_gradient_x = 0.0;
+            real_t collision_cost_gradient_y = 0.0;
             real_t d_safe = coupling_.d_safe;
             
             if (dist_current < d_safe) {
                 // Violation! Add gradient of linearized barrier
                 real_t violation = d_safe - dist_current;
-                real_t direction = (pos_i_current - pos_j_current) / (dist_current + 1e-6);
+                
+                // Normalized direction vector from j to i
+                real_t norm = dist_current + 1e-6;  // Avoid division by zero
+                real_t dir_x = dx / norm;
+                real_t dir_y = dy / norm;
                 
                 // Gradient: ∇[violation²] = 2*violation*∇[violation]
                 //         = 2*violation*(-direction)
                 //         = -2*(d_safe - dist)*direction
                 // With factor ρ_collision/2: -ρ_collision*(d_safe - dist)*direction
-                collision_cost_gradient = -rho_collision * violation * direction;
+                real_t grad_magnitude = -rho_collision * violation;
+                collision_cost_gradient_x = grad_magnitude * dir_x;
+                collision_cost_gradient_y = grad_magnitude * dir_y;
                 num_violations_grad++;
             }
             // else: Safe distance, no collision cost gradient
             
-            // Add both terms to position gradient
-            g[idx_g + 0] += admm_dual_term + collision_cost_gradient;
+            // Add both terms to position gradient (x and y components)
+            g[idx_g + 0] += admm_dual_term_x + collision_cost_gradient_x;
+            g[idx_g + 1] += admm_dual_term_y + collision_cost_gradient_y;
             
-            total_coupling += fabs(admm_dual_term) + fabs(collision_cost_gradient);
-            total_admm += fabs(admm_dual_term);
-            total_collision_cost += fabs(collision_cost_gradient);
+            total_coupling += fabs(admm_dual_term_x) + fabs(admm_dual_term_y) + fabs(collision_cost_gradient_x) + fabs(collision_cost_gradient_y);
+            total_admm += fabs(admm_dual_term_x) + fabs(admm_dual_term_y);
+            total_collision_cost += fabs(collision_cost_gradient_x) + fabs(collision_cost_gradient_y);
         }
     }
     
@@ -2007,11 +2124,17 @@ returnValue TurboADMM::projectCollisionConstraints()
                 int idx_i = (k == agent_i.N) ? agent_i.N * (nx_i + nu_i) : k * (nx_i + nu_i);
                 int idx_j = (k == agent_j.N) ? agent_j.N * (nx_j + nu_j) : k * (nx_j + nu_j);
                 
-                // Compute POSITION-ONLY distance (collision avoidance is based on position, not velocity)
-                // For nx=2 (position, velocity), use only state[0] (position)
-                real_t pos_i = z_local_[i][idx_i + 0];
-                real_t pos_j = z_local_[j][idx_j + 0];
-                real_t dist = fabs(pos_i - pos_j);
+                // Compute 2D POSITION distance (collision avoidance is based on (x,y) position, not velocity)
+                // For nx=4 (x, y, vx, vy), use state[0:1] (x, y position)
+                real_t x_i = z_local_[i][idx_i + 0];
+                real_t y_i = z_local_[i][idx_i + 1];
+                real_t x_j = z_local_[j][idx_j + 0];
+                real_t y_j = z_local_[j][idx_j + 1];
+                
+                // 2D Euclidean distance
+                real_t dx = x_i - x_j;
+                real_t dy = y_i - y_j;
+                real_t dist = sqrt(dx*dx + dy*dy);
                 
                 // Debug output for first call at k=N (terminal state)
                 if (call_count == 2 && k == agent_i.N) {
@@ -2080,33 +2203,69 @@ returnValue TurboADMM::projectCollisionConstraints()
                                j, i, v_collision_[j][i][0][0], v_collision_[j][i][0][1]);
                     }
                 } else {
-                    // Violation - apply symmetric projection ON POSITION ONLY
+                    // Violation - apply symmetric projection in 2D (x, y)
                     // Numerical stability: handle near-zero distance
                     if (dist < 1e-8) {
-                        // Agents at same position - separate along position dimension
+                        // Agents at same position - separate along x-axis by default
                         real_t separation = coupling_.d_safe / 2.0;
-                        v_collision_[i][j][k][0] = z_local_[i][idx_i + 0] + separation;
-                        v_collision_[j][i][k][0] = z_local_[j][idx_j + 0] - separation;
+                        v_collision_[i][j][k][0] = z_local_[i][idx_i + 0] + separation;  // x
+                        v_collision_[j][i][k][0] = z_local_[j][idx_j + 0] - separation;  // x
+                        v_collision_[i][j][k][1] = z_local_[i][idx_i + 1];  // y (unchanged)
+                        v_collision_[j][i][k][1] = z_local_[j][idx_j + 1];  // y (unchanged)
                         
-                        // Keep other states (velocity, etc.) unchanged
-                        for (int s = 1; s < nx_i; ++s) {
+                        // Keep velocity states unchanged
+                        for (int s = 2; s < nx_i; ++s) {
                             v_collision_[i][j][k][s] = z_local_[i][idx_i + s];
                             v_collision_[j][i][k][s] = z_local_[j][idx_j + s];
                         }
                     } else {
-                        // Normal case: symmetric projection on position only
-                        real_t pos_i = z_local_[i][idx_i + 0];
-                        real_t pos_j = z_local_[j][idx_j + 0];
+                        // Normal case: symmetric projection in 2D
+                        // Compute midpoint in 2D
+                        real_t mid_x = (x_i + x_j) / 2.0;
+                        real_t mid_y = (y_i + y_j) / 2.0;
                         
-                        real_t midpoint = (pos_i + pos_j) / 2.0;
-                        real_t direction = (pos_i - pos_j) / dist;  // dist is position distance
+                        // Normalized direction vector from j to i
+                        real_t dir_x = dx / dist;
+                        real_t dir_y = dy / dist;
                         
-                        // Project position to d_safe apart
-                        v_collision_[i][j][k][0] = midpoint + (coupling_.d_safe / 2.0) * direction;
-                        v_collision_[j][i][k][0] = midpoint - (coupling_.d_safe / 2.0) * direction;
+                        // Project positions to d_safe apart symmetrically
+                        real_t half_safe = coupling_.d_safe / 2.0;
                         
-                        // Keep other states (velocity, etc.) unchanged
-                        for (int s = 1; s < nx_i; ++s) {
+                        // DIAGNOSTIC: Print projection details for k=5 in final iteration
+                        static int proj_call_count = 0;
+                        proj_call_count++;
+                        if (k == 5 && proj_call_count >= 1 && proj_call_count <= 3) {  // First 3 calls
+                            printf("\n[PROJECTION k=5 DIAGNOSTIC]\n");
+                            printf("  Agent %d: (%.2f, %.2f)\n", i, x_i, y_i);
+                            printf("  Agent %d: (%.2f, %.2f)\n", j, x_j, y_j);
+                            printf("  Distance: %.4f (d_safe=%.2f)\n", dist, coupling_.d_safe);
+                            printf("  Midpoint: (%.2f, %.2f)\n", mid_x, mid_y);
+                            printf("  Direction (dx, dy): (%.4f, %.4f)\n", dx, dy);
+                            printf("  Normalized dir: (%.4f, %.4f)\n", dir_x, dir_y);
+                            printf("  Half-safe distance: %.2f\n", half_safe);
+                        }
+                        v_collision_[i][j][k][0] = mid_x + half_safe * dir_x;  // x_i projected
+                        v_collision_[i][j][k][1] = mid_y + half_safe * dir_y;  // y_i projected
+                        v_collision_[j][i][k][0] = mid_x - half_safe * dir_x;  // x_j projected
+                        v_collision_[j][i][k][1] = mid_y - half_safe * dir_y;  // y_j projected
+                        
+                        // DIAGNOSTIC: Print projected positions
+                        if (k == 5 && proj_call_count >= 1 && proj_call_count <= 3) {
+                            printf("  Projected v[%d][%d][5]: (%.2f, %.2f)\n", 
+                                   i, j, v_collision_[i][j][k][0], v_collision_[i][j][k][1]);
+                            printf("  Projected v[%d][%d][5]: (%.2f, %.2f)\n", 
+                                   j, i, v_collision_[j][i][k][0], v_collision_[j][i][k][1]);
+                            real_t proj_dist = sqrt(
+                                (v_collision_[i][j][k][0] - v_collision_[j][i][k][0]) * 
+                                (v_collision_[i][j][k][0] - v_collision_[j][i][k][0]) +
+                                (v_collision_[i][j][k][1] - v_collision_[j][i][k][1]) * 
+                                (v_collision_[i][j][k][1] - v_collision_[j][i][k][1])
+                            );
+                            printf("  Projected distance: %.4f (should be %.2f)\n\n", proj_dist, coupling_.d_safe);
+                        }
+                        
+                        // Keep velocity states unchanged
+                        for (int s = 2; s < nx_i; ++s) {
                             v_collision_[i][j][k][s] = z_local_[i][idx_i + s];
                             v_collision_[j][i][k][s] = z_local_[j][idx_j + s];
                         }

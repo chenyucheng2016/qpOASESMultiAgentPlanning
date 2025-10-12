@@ -6886,7 +6886,7 @@ returnValue QProblem::detectMPCStructure()
 /*
  *	s o l v e R i c c a t i L Q R
  */
-returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
+returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const double* g )
 {
     /* Check if MPC structure is properly initialized */
     if ( mpcData.isInitialized == BT_FALSE )
@@ -6910,10 +6910,35 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
             return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
     }
 
-    /* Allocate temporary workspace for cost-to-go vectors */
+    /* Allocate temporary workspace for cost-to-go vectors (for linear cost term) */
     real_t* v = new real_t[mpcData.N * mpcData.nx];
     if ( v == 0 )
         return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+    
+    /* Allocate affine feedback term (only if gradient is provided) */
+    real_t* k_affine = 0;
+    if ( g != 0 )
+    {
+        k_affine = new real_t[(mpcData.N-1) * mpcData.nu];
+        if ( k_affine == 0 )
+        {
+            delete[] v;
+            return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+        }
+    }
+    
+    /* Allocate storage for Sinv matrices (to reuse in affine feedback computation) */
+    real_t* Sinv_all = 0;
+    if ( g != 0 )
+    {
+        Sinv_all = new real_t[(mpcData.N-1) * mpcData.nu * mpcData.nu];
+        if ( Sinv_all == 0 )
+        {
+            delete[] v;
+            delete[] k_affine;
+            return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
+        }
+    }
 
     /* Initialize terminal conditions: P_N = Q (terminal cost matrix) */
     int nx = mpcData.nx;
@@ -6992,11 +7017,11 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
                 if ( i == j )
                 {
                     if ( sum <= 0.0 )
-					{
-						delete[] APBK; delete[] APB; delete[] APA; delete[] AP;
-						delete[] BPA; delete[] Sinv; delete[] S; delete[] BP;
-						return THROWERROR( RET_HESSIAN_NOT_SPD );
-					}
+                    {
+                        delete[] APBK; delete[] APB; delete[] APA; delete[] AP;
+                        delete[] BPA; delete[] Sinv; delete[] S; delete[] BP;
+                        return THROWERROR( RET_HESSIAN_NOT_SPD );
+                    }
                     Sinv[i*nu + j] = getSqrt( sum );
                 }
                 else
@@ -7033,6 +7058,13 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
         for ( int i = 0; i < nu*nu; ++i )
             Sinv[i] = S[i];
         
+        /* Store Sinv for later use in affine feedback (if gradient provided) */
+        if ( g != 0 && Sinv_all != 0 )
+        {
+            for ( int i = 0; i < nu*nu; ++i )
+                Sinv_all[k*nu*nu + i] = Sinv[i];
+        }
+        
         /* Step 4: Compute K_k = S^{-1} B^T P_{k+1} A */
         /* First: BPA = B^T P_{k+1} A */
         for ( int i = 0; i < nu; ++i )
@@ -7051,6 +7083,14 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
                 for ( int k = 0; k < nu; ++k )
                     K_curr[i*nx + j] += Sinv[i*nu + k] * BPA[k*nx + j];
             }
+        
+        /* DEBUG: Log first few gains */
+        static int backward_pass_count = 0;
+        if (backward_pass_count < 2 && k < 2) {
+            printf("[RICCATI BACKWARD k=%d] K[0,0]=%.4f, K[0,1]=%.4f, P_next[0,0]=%.4f\n",
+                   k, K_curr[0], (nx > 1 ? K_curr[1] : 0.0), P_next[0]);
+            if (k == 0) backward_pass_count++;
+        }
         
         /* Step 5: Compute P_k = Q + A^T P_{k+1} A - A^T P_{k+1} B K */
         /* AP = A^T P_{k+1} */
@@ -7103,21 +7143,97 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
         delete[] S;
         delete[] BP;
 
-        /* Update cost-to-go vector: v_k = A^T v_{k+1} */
-        for ( int i = 0; i < nx; ++i )
+        /* Update cost-to-go vector for linear term */
+        if ( g != 0 )
         {
-            v_curr[i] = 0.0;
-            for ( int j = 0; j < nx; ++j )
-                v_curr[i] += A_k[j*nx + i] * v_next[j];
+            /* Extract gradient for this stage: g_k = [g_x[k]; g_u[k]] */
+            const real_t* g_x_k = &g[k * (nx + nu)];
+            const real_t* g_u_k = &g[k * (nx + nu) + nx];
+            
+            /* Compute affine feedback: k_k = Sinv × (B^T v_{k+1} + g_u_k) */
+            /* Sinv was already computed and stored in Sinv_all */
+            const real_t* Sinv_k = &Sinv_all[k * nu * nu];
+            
+            /* Compute B^T v_{k+1} */
+            real_t* Bv = new real_t[nu];
+            for ( int i = 0; i < nu; ++i )
+            {
+                Bv[i] = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    Bv[i] += B_k[j*nu + i] * v_next[j];
+            }
+            
+            /* k_k = Sinv × (Bv + g_u_k) */
+            real_t* k_k = &k_affine[k * nu];
+            for ( int i = 0; i < nu; ++i )
+            {
+                k_k[i] = 0.0;
+                for ( int j = 0; j < nu; ++j )
+                    k_k[i] += Sinv_k[i*nu + j] * (Bv[j] + g_u_k[j]);
+            }
+            
+            delete[] Bv;
+            
+            /* Update v_k: v_k = A^T v_{k+1} - A^T P_{k+1} B k_k + g_x_k */
+            /* First: A^T v_{k+1} */
+            for ( int i = 0; i < nx; ++i )
+            {
+                v_curr[i] = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    v_curr[i] += A_k[j*nx + i] * v_next[j];
+            }
+            
+            /* Subtract A^T P_{k+1} B k_k */
+            real_t* PBk = new real_t[nx];
+            for ( int i = 0; i < nx; ++i )
+            {
+                PBk[i] = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    for ( int k2 = 0; k2 < nu; ++k2 )
+                        PBk[i] += P_next[i*nx + j] * B_k[j*nu + k2] * k_k[k2];
+            }
+            for ( int i = 0; i < nx; ++i )
+            {
+                real_t APBk_i = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    APBk_i += A_k[j*nx + i] * PBk[j];
+                v_curr[i] -= APBk_i;
+            }
+            delete[] PBk;
+            
+            /* Add g_x_k */
+            for ( int i = 0; i < nx; ++i )
+                v_curr[i] += g_x_k[i];
+        }
+        else
+        {
+            /* Pure LQR: v_k = A^T v_{k+1} (original code) */
+            for ( int i = 0; i < nx; ++i )
+            {
+                v_curr[i] = 0.0;
+                for ( int j = 0; j < nx; ++j )
+                    v_curr[i] += A_k[j*nx + i] * v_next[j];
+            }
         }
     }
 
     /* Forward pass: compute optimal trajectory if requested */
     if ( x_opt != 0 && u_opt != 0 )
     {
-        /* x_0 = initial state (use current primal solution as initial state) */
-        for ( int i = 0; i < nx; ++i )
-            x_opt[i] = (x != 0) ? x[i] : 0.0;
+        /* x_0 = initial state 
+         * IMPORTANT: x_opt is both input and output!
+         * The caller should set x_opt[0:nx-1] to the initial state before calling this function.
+         * We preserve it here (don't overwrite with QProblem's x).
+         */
+        /* x_opt[0:nx-1] already contains the initial state from the caller - don't overwrite it! */
+        
+        /* DEBUG: Log forward pass execution */
+        static int forward_pass_count = 0;
+        if (forward_pass_count < 2) {
+            printf("[RICCATI FORWARD] Forward pass executing, x[0] = (%.2f, %.2f), N=%d\n", 
+                   x_opt[0], (nx > 1 ? x_opt[1] : 0.0), N);
+            forward_pass_count++;
+        }
 
         /* Forward rollout: x_{k+1} = A x_k + B u_k, u_k = -K_k x_k */
         for ( int k = 0; k < N-1; ++k )
@@ -7126,12 +7242,16 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
             real_t* B_k = mpcData.B;
             real_t* K_k = &K[k * nu * nx];
 
-            /* u_k = -K_k x_k */
+            /* u_k = -K_k x_k - k_k (affine feedback if gradient provided) */
             for ( int i = 0; i < nu; ++i )
             {
                 u_opt[k*nu + i] = 0.0;
                 for ( int j = 0; j < nx; ++j )
                     u_opt[k*nu + i] -= K_k[i*nx + j] * x_opt[k*nx + j];
+                
+                /* Add affine term if gradient was provided */
+                if ( g != 0 && k_affine != 0 )
+                    u_opt[k*nu + i] -= k_affine[k*nu + i];
             }
 
             /* x_{k+1} = A x_k + B u_k */
@@ -7143,11 +7263,22 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt )
                 for ( int j = 0; j < nu; ++j )
                     x_opt[(k+1)*nx + i] += B_k[i*nu + j] * u_opt[k*nu + j];
             }
+            
+            /* DEBUG: Log first few steps */
+            if (forward_pass_count <= 2 && k < 2) {
+                printf("[RICCATI FORWARD k=%d] x[k]=(%.2f,%.2f), u[k]=%.2f, K[0,0]=%.2f, x[k+1]=(%.2f,%.2f)\n",
+                       k, x_opt[k*nx], x_opt[k*nx+1], u_opt[k*nu], K_k[0],
+                       x_opt[(k+1)*nx], x_opt[(k+1)*nx+1]);
+            }
         }
     }
 
     /* Clean up temporary memory */
     delete[] v;
+    if ( k_affine != 0 )
+        delete[] k_affine;
+    if ( Sinv_all != 0 )
+        delete[] Sinv_all;
 
     return SUCCESSFUL_RETURN;
 }
@@ -7245,17 +7376,41 @@ returnValue QProblem::setupMPCTQfactorisation( )
     int nu = mpcData.nu;
     int N = mpcData.N;
     int nC_dyn = (N - 1) * nx;  /* Only dynamic constraints */
+    
+    /* For large horizons, skip custom TQ factorization to avoid memory issues */
+    /* The Riccati warm start already provides excellent performance */
+    if ( N > 40 )
+    {
+        #ifndef __SUPPRESSANYOUTPUT__
+        myPrintf( "WARNING: Horizon too large, skipping custom MPC TQ factorization\n" );
+        #endif
+        return RET_MPC_TQ_FACTORIZATION_FAILED;  /* Will trigger fallback to standard TQ */
+    }
 
     /* Exploit MPC structure for O(N) factorization */
     if ( constraints.getNC( ) <= 0 )
         return SUCCESSFUL_RETURN;  /* No constraints to factorize */
 
+    /* Get free variable information */
+    int nV = getNV();  /* Total variables in QP */
+    int_t* FR_idx;
+    bounds.getFree()->getNumberArray(&FR_idx);
+    int nFR = getNFR();
+    
+    /* For large horizons or many free variables, allocate workspace properly */
+    /* Note: Q matrix should be nFR x nFR for free variables */
+    int Q_size = (nFR > nC_dyn) ? nFR : nC_dyn;
+    
     /* Initialize MPC TQ factorization workspace if needed */
-    if ( mpcQ == 0 )
+    if ( mpcQ == 0 || mpcSizeT < Q_size )
     {
-        mpcSizeT = nC_dyn;
-        mpcQ = new real_t[nC_dyn * nC_dyn];
-        mpcT = new real_t[nC_dyn * nC_dyn];
+        /* Free old memory if size changed */
+        if ( mpcQ != 0 ) delete[] mpcQ;
+        if ( mpcT != 0 ) delete[] mpcT;
+        
+        mpcSizeT = Q_size;
+        mpcQ = new real_t[Q_size * Q_size];
+        mpcT = new real_t[Q_size * Q_size];
         
         if ( mpcQ == 0 || mpcT == 0 )
             return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
@@ -7264,12 +7419,7 @@ returnValue QProblem::setupMPCTQfactorisation( )
     /* O(N) TQ factorization exploiting block-bidiagonal structure of MPC constraints */
     /* Constraint structure: x_{k+1} = A x_k + B u_k for k = 0..N-2 */
     
-    int nV = getNV();  /* Total variables in QP */
-    int_t* FR_idx;
-    bounds.getFree()->getNumberArray(&FR_idx);
-    int nFR = getNFR();
-    
-    /* Initialize Q as identity for free variables */
+    /* Initialize mpcQ as identity for free variables projection */
     for ( int i = 0; i < nV; ++i )
     {
         for ( int j = 0; j < nV; ++j )

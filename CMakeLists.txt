@@ -195,6 +195,14 @@ if (QPOASES_BUILD_EXAMPLES)
     ENDFOREACH(ELEMENT ${EXAMPLE_NAMES})
 endif(QPOASES_BUILD_EXAMPLES)
 
+############################################################
+######################### tests ###########################
+############################################################
+
+# TurboADMM tests
+ADD_EXECUTABLE(test_admm_basic tests/test_admm_basic.cpp)
+TARGET_LINK_LIBRARIES(test_admm_basic qpOASES)
+
 ##
 ##   end of file
 ##

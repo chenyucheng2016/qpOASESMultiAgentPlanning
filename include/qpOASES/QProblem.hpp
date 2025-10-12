@@ -441,10 +441,10 @@ class QProblem : public QProblemB
 		returnValue getFreeVariablesFlags( BooleanType* varIsFree );
 
 		/** Sets up MPC problem structure with user-provided matrices.
-		 *	\return SUCCESSFUL_RETURN \n
-		 *			RET_MPC_SETUP_FAILED \n
-		 *			RET_INVALID_ARGUMENTS */
-		returnValue setupMPCStructure(	int_t _N,                       /**< Prediction horizon. */
+	 *	\return SUCCESSFUL_RETURN \n
+	 *			RET_MPC_SETUP_FAILED \n
+	 *			RET_INVALID_ARGUMENTS */
+	returnValue setupMPCStructure(	int_t _N,                       /**< Prediction horizon. */
 										int_t _nx,                      /**< Number of states. */
 										int_t _nu,                      /**< Number of inputs. */
 										const real_t* const _A,         /**< State transition matrix. */
@@ -452,13 +452,16 @@ class QProblem : public QProblemB
 										const real_t* const _Q,         /**< State weighting matrix. */
 										const real_t* const _R          /**< Input weighting matrix. */
 										);
-		
-		/** Solves the discrete-time algebraic Riccati equation for LQR problem.
-		 *	\return SUCCESSFUL_RETURN \n
-		 *			RET_RICCATI_SOLVE_FAILED \n
-		 *			RET_INVALID_ARGUMENTS */
-		returnValue solveRiccatiLQR(	real_t* P_out,                  /**< Output: Riccati solution matrices. */
-										real_t* K_out                   /**< Output: Feedback gain matrices. */
+	
+	/** Solves the discrete-time algebraic Riccati equation for LQR problem with optional linear cost.
+	 *  If g is NULL: solves pure LQR (minimize x^T Q x + u^T R u)
+	 *  If g is provided: solves affine LQR (minimize x^T Q x + u^T R u + g^T z)
+	 *	\return SUCCESSFUL_RETURN \n
+	 *			RET_RICCATI_SOLVE_FAILED \n
+	 *			RET_INVALID_ARGUMENTS */
+	returnValue solveRiccatiLQR(	real_t* x_opt,                  /**< Output: optimal state trajectory. */
+										real_t* u_opt,                  /**< Output: optimal control trajectory. */
+										const real_t* g = 0             /**< Optional: linear cost term (gradient vector). */
 										);
 		
 		/** Sets up auxiliary QP with dynamics-only active set using Riccati solution.

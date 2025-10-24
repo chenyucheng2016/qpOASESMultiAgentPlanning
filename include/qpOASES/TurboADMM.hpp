@@ -480,10 +480,10 @@ protected:
     // Collision coupling (coupling-constraint ADMM)
     returnValue projectCollisionConstraints();
     returnValue updateCollisionDuals();
-    returnValue addCollisionCouplingGradient(int agent_i, real_t* g);
+    returnValue addCollisionCouplingGradient(int agent_i, real_t* g, int admm_iter);
     
     // Warm start utilities
-    returnValue initializeWithRiccati(const real_t* const* x_init);
+    returnValue initializeADMMVariables(const real_t* const* x_init);
     returnValue shiftTrajectories();
     
     // Helper functions
@@ -513,6 +513,9 @@ private:
     
     // Agent solvers (layer 1: MPC-aware qpOASES)
     QProblem** agent_solvers_;  /**< Array of QProblem instances */
+    
+    // MPC-aware qpOASES data
+    real_t** agent_Q_aug_;      /**< Augmented Q matrices for MPC structure (per agent) */
     
     // ADMM variables
     real_t** z_local_;          /**< Local primal variables (per agent) */

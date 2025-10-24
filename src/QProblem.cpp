@@ -1580,17 +1580,24 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	if ( ( options.enableMPCRiccati == BT_TRUE ) && ( mpcData.isInitialized == BT_TRUE ) )
 	{
 		/* Use MPC-specific O(N) TQ factorization */
+		// printf( "[OPTION 3] Attempting MPC-aware TQ factorization (enableMPCRiccati=TRUE)\n" );
 		if ( setupMPCTQfactorisation() != SUCCESSFUL_RETURN )
 		{
 			THROWWARNING( RET_MPC_TQ_FACTORIZATION_FAILED );
-			myPrintf( "WARNING: MPC TQ factorization failed. Using standard factorization.\n" );
+			// printf( "WARNING: MPC TQ factorization failed. Using standard factorization.\n" );
 			if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
 				return THROWERROR( RET_INIT_FAILED_TQ );
 		}
+		// else
+		// {
+		// 	printf( "[OPTION 3] MPC-aware TQ factorization SUCCESS\n" );
+		// }
 	}
 	else
 	{
 		/* Use standard TQ factorization */
+		// printf( "[OPTION 3] Using standard TQ factorization (enableMPCRiccati=%d, mpcInit=%d)\n",
+		//         options.enableMPCRiccati, mpcData.isInitialized);
 		if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
 			return THROWERROR( RET_INIT_FAILED_TQ );
 	}

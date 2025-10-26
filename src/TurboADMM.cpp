@@ -1498,6 +1498,7 @@ returnValue TurboADMM::solveColdStart(
                     nullptr      // guessedConstraints
                 );
                 printf("[QP ITER] Agent %d, ADMM iter %d, init() with Riccati: %d iterations\n", i, admm_iter, nWSR);
+                printf("[QP RETURN CODE] Agent %d: init() returned code %d (SUCCESSFUL_RETURN=%d, RET_QP_SOLVED=%d)\n", i, ret, SUCCESSFUL_RETURN, RET_QP_SOLVED);
                 
                 // Clean up Riccati solution
                 delete[] z_riccati;
@@ -1593,7 +1594,10 @@ returnValue TurboADMM::solveColdStart(
             
             delete[] g;
             
-            if (ret != SUCCESSFUL_RETURN) {
+            // Check if QP solve was successful
+            // qpOASES returns SUCCESSFUL_RETURN (0) or RET_QP_SOLVED (36) for successful solves
+            if (ret != SUCCESSFUL_RETURN && ret != RET_QP_SOLVED) {
+                printf("[ERROR] Agent %d QP solve failed with code %d\n", i, ret);
                 stats_.converged = BT_FALSE;
                 if (converged_out)
                     *converged_out = BT_FALSE;
@@ -1698,9 +1702,30 @@ returnValue TurboADMM::computeTrackingGradient(int agent_id, real_t* g_out)
     
     // Terminal state x_N (50% weight, same as all stages)
     real_t terminal_weight = 0.5;
+    
+    #ifndef __SUPPRESSANYOUTPUT__
+    printf("[GRADIENT DEBUG] Agent %d Terminal State:\n", agent_id);
+    printf("  x_ref[N] = (%.2f, %.2f, %.2f, %.2f)\n",
+           agent.x_ref[agent.N * agent.nx + 0],
+           agent.x_ref[agent.N * agent.nx + 1],
+           agent.x_ref[agent.N * agent.nx + 2],
+           agent.x_ref[agent.N * agent.nx + 3]);
+    printf("  Q_diag = (%.2f, %.2f, %.2f, %.2f)\n",
+           agent.Q_diag[0], agent.Q_diag[1], agent.Q_diag[2], agent.Q_diag[3]);
+    #endif
+    
     for (int i = 0; i < agent.nx; ++i) {
         real_t diff = 0.0 - agent.x_ref[agent.N * agent.nx + i];
-        g_out[idx++] = terminal_weight * agent.Q_diag[i] * diff;
+        g_out[idx] = terminal_weight * agent.Q_diag[i] * diff;
+        
+        #ifndef __SUPPRESSANYOUTPUT__
+        if (i < 4) {
+            printf("  g[N][%d] = %.2f * %.2f * (0 - %.2f) = %.4f\n",
+                   i, terminal_weight, agent.Q_diag[i], agent.x_ref[agent.N * agent.nx + i], g_out[idx]);
+        }
+        #endif
+        
+        idx++;
     }
     
     return SUCCESSFUL_RETURN;

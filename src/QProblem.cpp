@@ -1492,63 +1492,228 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	{
 		if ( mpcData.isInitialized == BT_TRUE )
 		{
+			#ifndef __SUPPRESSANYOUTPUT__
+			printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+			printf("[MPC SETUP] Setting up MPC-aware auxiliary QP\n");
+			printf("[MPC SETUP] Problem dimensions: N=%d, nx=%d, nu=%d\n", 
+			       mpcData.N, mpcData.nx, mpcData.nu);
+			#endif
+
 			/* Allocate storage for LQR trajectory */
-			/* States: x_0, x_1, ..., x_N (total: N+1 states, but x_0 is initial condition) */
-			/* Inputs: u_0, u_1, ..., u_{N-1} (total: N-1 inputs) */
-			int nStates = mpcData.N * mpcData.nx;  /* x_1...x_N */
-			int nInputs = (mpcData.N - 1) * mpcData.nu;  /* u_0...u_{N-1} */
-			int nV_MPC = nStates + nInputs;  /* Total variables */
-			
-			real_t* x_LQR = new real_t[nV_MPC];
-			if ( x_LQR == 0 )
+			/* States: x_0, x_1, ..., x_N (N+1 states INCLUDING x_0) */
+			/* Controls: u_0, u_1, ..., u_{N-1} (N controls) */
+			int nStates = (mpcData.N + 1) * mpcData.nx;   // FIXED: include x_0
+			int nControls = mpcData.N * mpcData.nu;
+			int nCostates = mpcData.N * mpcData.nx;        // λ_0...λ_{N-1}
+
+			#ifndef __SUPPRESSANYOUTPUT__
+			printf("[MPC SETUP] Allocating: nStates=%d, nControls=%d, nCostates=%d\n",
+			       nStates, nControls, nCostates);
+			#endif
+
+			real_t* x_riccati = new real_t[nStates];
+			real_t* u_riccati = new real_t[nControls];
+			real_t* lambda_riccati = new real_t[nCostates];
+
+			if ( x_riccati == 0 || u_riccati == 0 || lambda_riccati == 0 )
 			{
+				delete[] lambda_riccati; delete[] u_riccati; delete[] x_riccati;
 				THROWWARNING( RET_MEMORY_ALLOCATION_FAILED );
+				printf("[MPC SETUP ERROR] Memory allocation failed!\n");
 				options.enableMPCRiccati = BT_FALSE;
 			}
 			else
 			{
-				/* Initialize x_LQR to zero (u_LQR can be NULL, computed internally) */
-				for ( int i = 0; i < nV_MPC; ++i )
-					x_LQR[i] = 0.0;
-				
-				/* Solve Riccati equation for LQR auxiliary problem */
-				if ( solveRiccatiLQR( x_LQR, 0 ) != SUCCESSFUL_RETURN )
+				/* CRITICAL FIX: Read x_0 from bounds (where TurboADMM fixed it)
+				 * NOT from x[] which is still zero from setupAuxiliaryQPsolution(NULL, NULL)!
+				 * 
+				 * For MPC problems, the initial state x[0] is typically fixed via bounds:
+				 * lb[0:nx-1] = ub[0:nx-1] = x_init
+				 * 
+				 * At this point in init(), x[] is still zero because setupAuxiliaryQPsolution
+				 * was called with xOpt=NULL. The actual initial condition is in the bounds!
+				 */
+				for ( int i = 0; i < mpcData.nx; ++i )
 				{
-					delete[] x_LQR;
+					// Check if this variable is fixed (lb == ub)
+					if ( fabs(lb[i] - ub[i]) < 1e-10 )
+						x_riccati[i] = lb[i];  // Use fixed value from bounds
+					else
+						x_riccati[i] = 0.0;     // Free variable, initialize to zero
+				}
+
+				#ifndef __SUPPRESSANYOUTPUT__
+				printf("[MPC SETUP] Initial condition x_0 (from bounds): [%.4f, %.4f, %.4f, %.4f]\n",
+				       x_riccati[0], mpcData.nx > 1 ? x_riccati[1] : 0.0,
+				       mpcData.nx > 2 ? x_riccati[2] : 0.0, mpcData.nx > 3 ? x_riccati[3] : 0.0);
+				#endif
+
+				/* Solve Riccati equation with gradient and costates */
+				const real_t* g_ptr = (g != 0) ? g : 0;
+
+				#ifndef __SUPPRESSANYOUTPUT__
+				printf("[MPC RICCATI] Calling solveRiccatiLQR\n");
+				printf("[MPC RICCATI]   with gradient: %s\n", g_ptr ? "YES" : "NO");
+				printf("[MPC RICCATI]   with costate output: YES\n");
+				#endif
+
+				if ( solveRiccatiLQR( x_riccati, u_riccati, g_ptr, lambda_riccati ) != SUCCESSFUL_RETURN )
+				{
+					delete[] lambda_riccati; delete[] u_riccati; delete[] x_riccati;
 					THROWWARNING( RET_RICCATI_SOLVE_FAILED );
-					myPrintf( "WARNING: Riccati solution failed. Falling back to general QP solver.\n" );
+					printf("[MPC RICCATI ERROR] Riccati solution failed!\n");
 					options.enableMPCRiccati = BT_FALSE;
 				}
 				else
 				{
-					/* Use LQR trajectory as auxiliary QP solution */
-					/* x_LQR contains: [x_1, x_2, ..., x_N, u_0, u_1, ..., u_{N-1}] */
-					if ( setupAuxiliaryQPsolution( x_LQR, 0 ) != SUCCESSFUL_RETURN )
+					#ifndef __SUPPRESSANYOUTPUT__
+					printf("[MPC RICCATI] ✓ Riccati solution successful\n");
+					printf("[MPC RICCATI] Primal solution:\n");
+					printf("  x[0]: [%.4f, %.4f]  x[1]: [%.4f, %.4f]  x[N]: [%.4f, %.4f]\n",
+					       x_riccati[0], x_riccati[1],
+					       x_riccati[mpcData.nx], x_riccati[mpcData.nx+1],
+					       x_riccati[mpcData.N*mpcData.nx], x_riccati[mpcData.N*mpcData.nx+1]);
+					printf("  u[0]: [%.4f, %.4f]  u[N-1]: [%.4f, %.4f]\n",
+					       u_riccati[0], mpcData.nu > 1 ? u_riccati[1] : 0.0,
+					       u_riccati[(mpcData.N-1)*mpcData.nu], 
+					       mpcData.nu > 1 ? u_riccati[(mpcData.N-1)*mpcData.nu+1] : 0.0);
+					printf("[MPC RICCATI] Dual solution (costates):\n");
+					printf("  λ[0]: [%.4f, %.4f]  λ[N-1]: [%.4f, %.4f]\n",
+					       lambda_riccati[0], lambda_riccati[1],
+					       lambda_riccati[(mpcData.N-1)*mpcData.nx], lambda_riccati[(mpcData.N-1)*mpcData.nx+1]);
+					#endif
+
+					/* Repack from Riccati separated format to qpOASES interleaved format */
+					/* Riccati: x_sep = [x_0, x_1, ..., x_N], u_sep = [u_0, ..., u_{N-1}] */
+					/* qpOASES: z_int = [x_0, u_0, x_1, u_1, ..., x_{N-1}, u_{N-1}, x_N] */
+
+					#ifndef __SUPPRESSANYOUTPUT__
+					printf("[MPC REPACK] Repacking from separated to interleaved format\n");
+					printf("[MPC REPACK] qpOASES nV=%d, expected=%d\n", nV, 
+					       (mpcData.N+1)*mpcData.nx + mpcData.N*mpcData.nu);
+					#endif
+
+					real_t* z_interleaved = new real_t[nV];
+					int idx = 0;
+
+					/* Interleave: [x_0, u_0, x_1, u_1, ..., x_{N-1}, u_{N-1}, x_N] */
+					for ( int k = 0; k < mpcData.N; ++k )
 					{
-						delete[] x_LQR;
+						/* Copy x_k (nx elements) */
+						for ( int j = 0; j < mpcData.nx; ++j )
+							z_interleaved[idx++] = x_riccati[k * mpcData.nx + j];
+						
+						/* Copy u_k (nu elements) */
+						for ( int j = 0; j < mpcData.nu; ++j )
+							z_interleaved[idx++] = u_riccati[k * mpcData.nu + j];
+					}
+
+					/* Copy x_N (final state, nx elements) */
+					for ( int j = 0; j < mpcData.nx; ++j )
+						z_interleaved[idx++] = x_riccati[mpcData.N * mpcData.nx + j];
+
+					#ifndef __SUPPRESSANYOUTPUT__
+					if ( idx != nV ) {
+						printf("[MPC REPACK ERROR] Size mismatch! Packed %d variables, expected nV=%d\n", idx, nV);
+					} else {
+						printf("[MPC REPACK] ✓ Successfully repacked %d variables\n", idx);
+						printf("[MPC REPACK] z[0:6]: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",
+						       z_interleaved[0], z_interleaved[1], z_interleaved[2],
+						       z_interleaved[3], z_interleaved[4], z_interleaved[5], z_interleaved[6]);
+					}
+					#endif
+
+					/* Check if Riccati solution violates bounds */
+					#ifndef __SUPPRESSANYOUTPUT__
+					int num_bound_violations = 0;
+					for ( int i = 0; i < nV; ++i ) {
+						if ( z_interleaved[i] < lb[i] - 1e-6 || z_interleaved[i] > ub[i] + 1e-6 ) {
+							if ( num_bound_violations < 5 ) {  // Only print first 5
+								printf("[BOUND CHECK] Variable %d violates: z=%.4f, lb=%.4f, ub=%.4f\n",
+								       i, z_interleaved[i], lb[i], ub[i]);
+							}
+							num_bound_violations++;
+						}
+					}
+					if ( num_bound_violations > 0 ) {
+						printf("[BOUND CHECK] ⚠ Riccati solution violates %d/%d bounds\n", num_bound_violations, nV);
+					} else {
+						printf("[BOUND CHECK] ✓ Riccati solution is feasible (no bound violations)\n");
+					}
+					#endif
+
+					/* Build qpOASES dual vector from Riccati costates */
+					/* y = [y_bounds[nV], y_constraints[nC]] */
+
+					#ifndef __SUPPRESSANYOUTPUT__
+					printf("[MPC DUAL] Building yOpt vector (size=%d)\n", nV + nC);
+					#endif
+
+					real_t* yOpt = new real_t[nV + nC];
+
+					/* Part 1: Bound duals = 0 (auxiliary QP is unbounded) */
+					for ( int i = 0; i < nV; ++i )
+						yOpt[i] = 0.0;
+
+					/* Part 2: Constraint duals from Riccati costates */
+					/* Dynamics constraints: x_{k+1} = A*x_k + B*u_k for k=0..N-1 */
+					int nC_dyn = (mpcData.N - 1) * mpcData.nx;
+
+					#ifndef __SUPPRESSANYOUTPUT__
+					printf("[MPC DUAL] Mapping %d dynamics constraint costates\n", nC_dyn);
+					#endif
+
+					for ( int i = 0; i < nC_dyn && i < nC; ++i )
+						yOpt[nV + i] = lambda_riccati[i];
+
+					/* Remaining constraints (if any) = 0 */
+					for ( int i = nC_dyn; i < nC; ++i )
+						yOpt[nV + i] = 0.0;
+
+					#ifndef __SUPPRESSANYOUTPUT__
+					printf("[MPC DUAL] yOpt structure: nV=%d (bounds), nC=%d (constraints), nC_dyn=%d\n",
+					       nV, nC, nC_dyn);
+					printf("[MPC DUAL] y_bounds[0:3]: [%.4f, %.4f, %.4f, %.4f] (all should be 0)\n",
+					       yOpt[0], yOpt[1], yOpt[2], yOpt[3]);
+					printf("[MPC DUAL] y_constr[0:3]: [%.4f, %.4f, %.4f, %.4f]\n",
+					       yOpt[nV], yOpt[nV+1], yOpt[nV+2], yOpt[nV+3]);
+					#endif
+
+					/* Use repacked trajectory and duals as auxiliary QP solution */
+					#ifndef __SUPPRESSANYOUTPUT__
+					printf("[MPC AUXILIARY] Calling setupAuxiliaryQPsolution\n");
+					printf("[MPC AUXILIARY]   xOpt: interleaved trajectory (nV=%d)\n", nV);
+					printf("[MPC AUXILIARY]   yOpt: costates mapped to duals (nV+nC=%d)\n", nV+nC);
+					#endif
+
+					if ( setupAuxiliaryQPsolution( z_interleaved, yOpt ) != SUCCESSFUL_RETURN )
+					{
+						delete[] yOpt; delete[] z_interleaved;
+						delete[] lambda_riccati; delete[] u_riccati; delete[] x_riccati;
 						THROWWARNING( RET_SETUP_AUXILIARYQP_FAILED );
+						printf("[MPC AUXILIARY ERROR] setupAuxiliaryQPsolution failed!\n");
 						options.enableMPCRiccati = BT_FALSE;
 					}
 					else
 					{
-						/* Mark dynamics constraints as active in auxiliary working set */
-						/* Dynamics: x_{k+1} = A x_k + B u_k for k = 0..N-2 */
+						#ifndef __SUPPRESSANYOUTPUT__
+						printf("[MPC AUXILIARY] ✓ setupAuxiliaryQPsolution successful\n");
+						#endif
+						
+						/* Mark dynamics constraints as active */
 						int nC_dyn = (mpcData.N - 1) * mpcData.nx;
 						for ( int i = 0; i < nC_dyn && i < nC; ++i )
-						{
-							/* Mark as equality constraint (active at lower bound) */
 							auxiliaryConstraints.setupConstraint( i, ST_LOWER );
-						}
 						
 						#ifndef __SUPPRESSANYOUTPUT__
-						char messageString[MAX_STRING_LENGTH];
-						snprintf( messageString, MAX_STRING_LENGTH, "MPC-aware qpOASES: Riccati LQR solved, %d dynamics constraints marked active.", nC_dyn );
-						myPrintf( messageString );
-						myPrintf( "\n" );
+						printf("[MPC AUXILIARY] Marked %d/%d dynamics constraints active\n", nC_dyn, nC);
+						printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 						#endif
 					}
-					
-					delete[] x_LQR;
+
+					/* Cleanup */
+					delete[] yOpt; delete[] z_interleaved;
+					delete[] lambda_riccati; delete[] u_riccati; delete[] x_riccati;
 				}
 			}
 		}
@@ -1571,36 +1736,12 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	}
 
 	/* c) Working set of auxiliary QP. */
-	/* IMPORTANT: Setup auxiliary working set FIRST so dynamics constraints are active */
 	if ( setupAuxiliaryWorkingSet( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
 		return THROWERROR( RET_INIT_FAILED );
 
 	/* d) TQ factorisation. */
-	/* Now that auxiliary working set is established, perform TQ factorization */
-	if ( ( options.enableMPCRiccati == BT_TRUE ) && ( mpcData.isInitialized == BT_TRUE ) )
-	{
-		/* Use MPC-specific O(N) TQ factorization */
-		// printf( "[OPTION 3] Attempting MPC-aware TQ factorization (enableMPCRiccati=TRUE)\n" );
-		if ( setupMPCTQfactorisation() != SUCCESSFUL_RETURN )
-		{
-			THROWWARNING( RET_MPC_TQ_FACTORIZATION_FAILED );
-			// printf( "WARNING: MPC TQ factorization failed. Using standard factorization.\n" );
-			if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
-				return THROWERROR( RET_INIT_FAILED_TQ );
-		}
-		// else
-		// {
-		// 	printf( "[OPTION 3] MPC-aware TQ factorization SUCCESS\n" );
-		// }
-	}
-	else
-	{
-		/* Use standard TQ factorization */
-		// printf( "[OPTION 3] Using standard TQ factorization (enableMPCRiccati=%d, mpcInit=%d)\n",
-		//         options.enableMPCRiccati, mpcData.isInitialized);
-		if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
-			return THROWERROR( RET_INIT_FAILED_TQ );
-	}
+	if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
+		return THROWERROR( RET_INIT_FAILED_TQ );
 
 	/* d) Copy external Cholesky factor if provided */
 	haveCholesky = BT_FALSE;
@@ -1678,8 +1819,118 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	if ( cputime != 0 )
 		*cputime -= getCPUtime( ) - starttime;
 
+	/* Store Riccati solution for comparison */
+	real_t* x_riccati_stored = 0;
+	if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
+	{
+		x_riccati_stored = new real_t[nV];
+		for ( int i = 0; i < nV; ++i )
+			x_riccati_stored[i] = x[i];  // Store Riccati solution
+	}
+
 	/* Use hotstart method to find the solution of the original initial QP,... */
 	returnValue returnvalue = hotstart( g_original,lb_original,ub_original,lbA_original,ubA_original, nWSR,cputime );
+
+	/* Compare Riccati solution with final QP solution */
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( x_riccati_stored != 0 && returnvalue == SUCCESSFUL_RETURN )
+	{
+		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+		printf("[SOLUTION COMPARISON] Riccati vs Final QP\n");
+		
+		// Compute differences
+		real_t max_diff = 0.0;
+		real_t avg_diff = 0.0;
+		int num_changed = 0;
+		int num_violations_riccati = 0;
+		int num_violations_final = 0;
+		
+		for ( int i = 0; i < nV; ++i )
+		{
+			real_t diff = fabs(x[i] - x_riccati_stored[i]);
+			if ( diff > 1e-6 )
+				num_changed++;
+			if ( diff > max_diff )
+				max_diff = diff;
+			avg_diff += diff;
+			
+			// Check bound violations
+			if ( x_riccati_stored[i] < lb_original[i] - 1e-6 || x_riccati_stored[i] > ub_original[i] + 1e-6 )
+				num_violations_riccati++;
+			if ( x[i] < lb_original[i] - 1e-6 || x[i] > ub_original[i] + 1e-6 )
+				num_violations_final++;
+		}
+		avg_diff /= nV;
+		
+		printf("[COMPARISON] Variables changed: %d/%d (%.1f%%)\n", 
+		       num_changed, nV, 100.0 * num_changed / nV);
+		printf("[COMPARISON] Max difference: %.6f\n", max_diff);
+		printf("[COMPARISON] Avg difference: %.6f\n", avg_diff);
+		printf("[COMPARISON] Riccati bound violations: %d/%d\n", num_violations_riccati, nV);
+		printf("[COMPARISON] Final bound violations: %d/%d\n", num_violations_final, nV);
+		
+		// Show first few variables that changed significantly
+		printf("[COMPARISON] Variables with largest changes:\n");
+		int shown = 0;
+		for ( int i = 0; i < nV && shown < 5; ++i )
+		{
+			real_t diff = fabs(x[i] - x_riccati_stored[i]);
+			if ( diff > 0.1 )  // Show changes > 0.1
+			{
+				printf("  x[%d]: Riccati=%.4f, Final=%.4f, Diff=%.4f, Bounds=[%.2f, %.2f]\n",
+				       i, x_riccati_stored[i], x[i], x[i] - x_riccati_stored[i],
+				       lb_original[i], ub_original[i]);
+				shown++;
+			}
+		}
+		
+		// Show complete trajectory comparison (states and controls)
+		if ( mpcData.isInitialized == BT_TRUE )
+		{
+			printf("\n[TRAJECTORY COMPARISON] Complete state and control trajectories:\n");
+			printf("Format: k | Riccati (x, u) | Final QP (x, u) | Difference\n");
+			printf("─────────────────────────────────────────────────────────────────\n");
+			
+			int idx = 0;
+			for ( int k = 0; k < mpcData.N; ++k )
+			{
+				// States x[k]
+				printf("k=%2d | x_R=(", k);
+				for ( int j = 0; j < mpcData.nx && j < 4; ++j )  // Show first 4 states
+					printf("%.2f%s", x_riccati_stored[idx + j], j < mpcData.nx-1 && j < 3 ? "," : "");
+				printf(") | x_F=(");
+				for ( int j = 0; j < mpcData.nx && j < 4; ++j )
+					printf("%.2f%s", x[idx + j], j < mpcData.nx-1 && j < 3 ? "," : "");
+				printf(")\n");
+				idx += mpcData.nx;
+				
+				// Controls u[k]
+				printf("     | u_R=(");
+				for ( int j = 0; j < mpcData.nu; ++j )
+					printf("%.2f%s", x_riccati_stored[idx + j], j < mpcData.nu-1 ? "," : "");
+				printf(") | u_F=(");
+				for ( int j = 0; j < mpcData.nu; ++j )
+					printf("%.2f%s", x[idx + j], j < mpcData.nu-1 ? "," : "");
+				printf(")\n");
+				idx += mpcData.nu;
+			}
+			
+			// Terminal state x[N]
+			printf("k=%2d | x_R=(", mpcData.N);
+			for ( int j = 0; j < mpcData.nx && j < 4; ++j )
+				printf("%.2f%s", x_riccati_stored[idx + j], j < mpcData.nx-1 && j < 3 ? "," : "");
+			printf(") | x_F=(");
+			for ( int j = 0; j < mpcData.nx && j < 4; ++j )
+				printf("%.2f%s", x[idx + j], j < mpcData.nx-1 && j < 3 ? "," : "");
+			printf(")\n");
+			printf("─────────────────────────────────────────────────────────────────\n");
+		}
+		
+		printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+		
+		delete[] x_riccati_stored;
+	}
+	#endif
 
 	/* ... deallocate memory,... */
 	delete[] ubA_original; delete[] lbA_original; delete[] ub_original; delete[] lb_original; delete[] g_original;
@@ -1734,6 +1985,90 @@ returnValue QProblem::solveQP(	const real_t* const g_new,
 	real_t starttime = 0.0;
 	if ( cputime != 0 )
 		starttime = getCPUtime( );
+
+	/* DIAGNOSTIC: Log internal state before hotstart (first call only) */
+	#ifndef __SUPPRESSANYOUTPUT__
+	static int hotstart_log_count = 0;
+	if ( hotstart_log_count < 2 && isFirstCall == BT_TRUE )
+	{
+		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+		printf("[HOTSTART DIAGNOSTIC] Internal state before hotstart\n");
+		printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+		
+		// 1. Current solution x
+		printf("[HOTSTART] Current solution x[0:5]: [");
+		for ( int i = 0; i < (nV < 6 ? nV : 6); ++i )
+			printf("%.4f%s", x[i], (i < 5 && i < nV-1) ? ", " : "");
+		printf("]\n");
+		
+		// 2. New gradient g
+		if ( g_new != 0 )
+		{
+			printf("[HOTSTART] New gradient g[0:5]: [");
+			for ( int i = 0; i < (nV < 6 ? nV : 6); ++i )
+				printf("%.4f%s", g_new[i], (i < 5 && i < nV-1) ? ", " : "");
+			printf("]\n");
+		}
+		
+		// 3. Active set status
+		int nFR = getNFR();
+		int nFX = getNFX();
+		int nAC = getNAC();
+		printf("[HOTSTART] Active set: nFR=%d, nFX=%d, nAC=%d (nV=%d, nC=%d)\n", 
+		       nFR, nFX, nAC, nV, nC);
+		
+		// 4. T, Q, R matrices (first few elements)
+		if ( T != 0 && sizeT > 0 )
+		{
+			printf("[HOTSTART] T matrix (first 3x3 block):\n");
+			for ( int i = 0; i < (sizeT < 3 ? sizeT : 3); ++i )
+			{
+				printf("  [");
+				for ( int j = 0; j < (sizeT < 3 ? sizeT : 3); ++j )
+					printf("%.4f%s", TT(i,j), (j < 2) ? ", " : "");
+				printf("]\n");
+			}
+		}
+		
+		if ( Q != 0 )
+		{
+			printf("[HOTSTART] Q matrix (first 3x3 block):\n");
+			for ( int i = 0; i < (nV < 3 ? nV : 3); ++i )
+			{
+				printf("  [");
+				for ( int j = 0; j < (nV < 3 ? nV : 3); ++j )
+					printf("%.4f%s", QQ(i,j), (j < 2) ? ", " : "");
+				printf("]\n");
+			}
+		}
+		
+		if ( R != 0 )
+		{
+			printf("[HOTSTART] R matrix (Cholesky factor, first 3x3 block):\n");
+			for ( int i = 0; i < (nV < 3 ? nV : 3); ++i )
+			{
+				printf("  [");
+				for ( int j = i; j < (nV < 3 ? nV : 3); ++j )
+					printf("%.4f%s", RR(i,j), (j < 2) ? ", " : "");
+				printf("]\n");
+			}
+		}
+		
+		// 5. MPC-aware status
+		if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
+		{
+			printf("[HOTSTART] MPC-aware mode: ENABLED (N=%d, nx=%d, nu=%d)\n",
+			       mpcData.N, mpcData.nx, mpcData.nu);
+		}
+		else
+		{
+			printf("[HOTSTART] MPC-aware mode: DISABLED\n");
+		}
+		
+		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+		hotstart_log_count++;
+	}
+	#endif
 
 	/* AW: Remove bounds if they were active before but are now infinity */
 	status = QPS_PERFORMINGHOMOTOPY; // AW TODO: Not sure if this is too early, but otherwise removeBounds will complain
@@ -2709,6 +3044,11 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 	}
 
 	/* 2) Add all equality constraints. */
+	int nEqualityConstraints = 0;
+	int nSkippedLICheck = 0;
+	int nAddedConstraints = 0;
+	int nFailedLICheck = 0;
+	
 	for( i=0; i<nC; ++i )
 	{
         //if ( ( constraints.getType( i ) == ST_EQUALITY ) && ( ( constraints.getStatus( i ) == ST_INACTIVE ) && ( auxiliaryConstraints->getStatus( i ) != ST_INACTIVE ) ) )
@@ -2717,20 +3057,36 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 
 		if ( ( constraints.getType( i ) == ST_EQUALITY ) && ( constraints.getStatus( i ) == ST_INACTIVE ) )
 		{
-            // assert ( auxiliaryConstraints->getStatus( i ) != ST_INACTIVE );
+			nEqualityConstraints++;
+			
 			/* Add constraint only if it is linearly independent from the current working set. */
 			if ( addConstraint_checkLI( i ) == RET_LINEARLY_INDEPENDENT )
 			{
-				if ( addConstraint( i,ST_LOWER,updateCholesky ) != SUCCESSFUL_RETURN )  // was auxiliaryConstraints->getStatus( i )
+				if ( addConstraint( i,ST_LOWER,updateCholesky ) != SUCCESSFUL_RETURN )
 					return THROWERROR( RET_SETUP_WORKINGSET_FAILED );
+				nAddedConstraints++;
 			}
 			else
 			{
 				/* Equalities are not linearly independent! */
 				constraints.setType(i, ST_BOUNDED);
+				nFailedLICheck++;
 			}
 		}
 	}
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( setupAfresh == BT_TRUE )
+	{
+		printf("[SETUP AUX WS] Equality constraint summary:\n");
+		printf("  Total equality constraints: %d\n", nEqualityConstraints);
+		printf("  Skipped LI check (MPC dynamics): %d\n", nSkippedLICheck);
+		printf("  Passed LI check: %d\n", nAddedConstraints - nSkippedLICheck);
+		printf("  Failed LI check: %d\n", nFailedLICheck);
+		printf("  Successfully added to active set: %d\n", nAddedConstraints);
+		printf("  Current nAC after adding equalities: %d\n", getNAC());
+	}
+	#endif
 
 
 	/* 3) Add all inactive bounds that shall be active AND
@@ -2784,6 +3140,20 @@ returnValue QProblem::setupAuxiliaryQPsolution(	const real_t* const xOpt, const 
 	int_t nV = getNV( );
 	int_t nC = getNC( );
 
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("[SETUP AUX SOL] Called with xOpt=%s, yOpt=%s\n",
+	       xOpt ? "PROVIDED" : "NULL", yOpt ? "PROVIDED" : "NULL");
+	if ( xOpt != 0 ) {
+		printf("[SETUP AUX SOL] xOpt[0:5]: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",
+		       xOpt[0], xOpt[1], xOpt[2], xOpt[3], xOpt[4], nV > 5 ? xOpt[5] : 0.0);
+	}
+	if ( yOpt != 0 ) {
+		printf("[SETUP AUX SOL] yOpt[0:3] (bounds): [%.4f, %.4f, %.4f, %.4f]\n",
+		       yOpt[0], yOpt[1], yOpt[2], yOpt[3]);
+		printf("[SETUP AUX SOL] yOpt[nV:nV+3] (constr): [%.4f, %.4f, %.4f, %.4f]\n",
+		       yOpt[nV], yOpt[nV+1], yOpt[nV+2], yOpt[nV+3]);
+	}
+	#endif
 
 	/* Setup primal/dual solution vector for auxiliary initial QP:
 	 * if a null pointer is passed, a zero vector is assigned;
@@ -2840,6 +3210,20 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 	int_t nV = getNV( );
 	int_t nC = getNC( );
 
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
+	{
+		printf("[AUX GRADIENT] MPC-aware mode: computing auxiliary QP gradient\n");
+		printf("[AUX GRADIENT] Input g[0:3] (before): [%.4f, %.4f, %.4f, %.4f]\n",
+		       g[0], g[1], g[2], g[3]);
+		printf("[AUX GRADIENT] Input x[0:3]: [%.4f, %.4f, %.4f, %.4f]\n",
+		       x[0], x[1], x[2], x[3]);
+		printf("[AUX GRADIENT] Input y[0:3] (bounds): [%.4f, %.4f, %.4f, %.4f]\n",
+		       y[0], y[1], y[2], y[3]);
+		printf("[AUX GRADIENT] Input y[nV:nV+3] (constr): [%.4f, %.4f, %.4f, %.4f]\n",
+		       y[nV], y[nV+1], y[nV+2], y[nV+3]);
+	}
+	#endif
 
 	/* Setup gradient vector: g = -H*x + [Id A]'*[yB yC]
 	 *                          = yB - H*x + A'*yC. */
@@ -2871,6 +3255,15 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 
 	/* + A'*yC */
 	A->transTimes(1, 1.0, y + nV, nC, 1.0, g, nV);
+
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
+	{
+		printf("[AUX GRADIENT] Output g[0:3] (after): [%.4f, %.4f, %.4f, %.4f]\n",
+		       g[0], g[1], g[2], g[3]);
+		printf("[AUX GRADIENT] Auxiliary QP gradient computed successfully\n");
+	}
+	#endif
 
 	return SUCCESSFUL_RETURN;
 }
@@ -6893,7 +7286,7 @@ returnValue QProblem::detectMPCStructure()
 /*
  *	s o l v e R i c c a t i L Q R
  */
-returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const double* g )
+returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const double* g, double* lambda_opt )
 {
     /* Check if MPC structure is properly initialized */
     if ( mpcData.isInitialized == BT_FALSE )
@@ -6956,9 +7349,37 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
     for ( int i = 0; i < nx*nx; ++i )
         P[(N-1)*nx*nx + i] = mpcData.Q[i];
 
-    /* v_N = 0 (no terminal linear cost for LQR) */
-    for ( int i = 0; i < nx; ++i )
-        v[(N-1)*nx + i] = 0.0;
+    /* v_N: Initialize terminal gradient from input gradient g (if provided) */
+    if ( g != 0 )
+    {
+        // Terminal gradient is at g[N*(nx+nu) : N*(nx+nu)+nx]
+        // Format: g = [g_x[0], g_u[0], g_x[1], g_u[1], ..., g_x[N-1], g_u[N-1], g_x[N]]
+        int terminal_idx = N * (nx + nu);  // Start of terminal state gradient
+        
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("[RICCATI] Terminal gradient extraction:\n");
+        printf("  N=%d, nx=%d, nu=%d\n", N, nx, nu);
+        printf("  terminal_idx = N*(nx+nu) = %d*(%d+%d) = %d\n", N, nx, nu, terminal_idx);
+        printf("  Reading g[%d:%d]:\n", terminal_idx, terminal_idx + nx - 1);
+        for ( int i = 0; i < nx && i < 4; ++i )
+            printf("    g[%d] = %.4f\n", terminal_idx + i, g[terminal_idx + i]);
+        #endif
+        
+        for ( int i = 0; i < nx; ++i )
+            v[(N-1)*nx + i] = g[terminal_idx + i];
+        
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("  v[N] = [%.4f, %.4f, %.4f, %.4f]\n",
+               v[(N-1)*nx + 0], nx > 1 ? v[(N-1)*nx + 1] : 0.0,
+               nx > 2 ? v[(N-1)*nx + 2] : 0.0, nx > 3 ? v[(N-1)*nx + 3] : 0.0);
+        #endif
+    }
+    else
+    {
+        // Pure LQR (no affine term): v_N = 0
+        for ( int i = 0; i < nx; ++i )
+            v[(N-1)*nx + i] = 0.0;
+    }
 
     /* Backward Riccati recursion: k = N-2, ..., 0 */
     for ( int k = N-2; k >= 0; --k )
@@ -7224,6 +7645,31 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
         }
     }
 
+    /* Store costates (cost-to-go vectors) if requested */
+    if ( lambda_opt != 0 )
+    {
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        printf("[RICCATI COSTATE] Returning costates for N=%d stages\n", N);
+        #endif
+        
+        for ( int k = 0; k < N; ++k )
+        {
+            for ( int i = 0; i < nx; ++i )
+                lambda_opt[k*nx + i] = v[k*nx + i];
+        }
+        
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("[RICCATI COSTATE] lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
+               lambda_opt[0], nx > 1 ? lambda_opt[1] : 0.0,
+               nx > 2 ? lambda_opt[2] : 0.0, nx > 3 ? lambda_opt[3] : 0.0);
+        printf("[RICCATI COSTATE] lambda[N-1]: [%.4f, %.4f, %.4f, %.4f]\n",
+               lambda_opt[(N-1)*nx], nx > 1 ? lambda_opt[(N-1)*nx+1] : 0.0,
+               nx > 2 ? lambda_opt[(N-1)*nx+2] : 0.0, nx > 3 ? lambda_opt[(N-1)*nx+3] : 0.0);
+        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        #endif
+    }
+
     /* Forward pass: compute optimal trajectory if requested */
     if ( x_opt != 0 && u_opt != 0 )
     {
@@ -7242,23 +7688,40 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
             forward_pass_count++;
         }
 
-        /* Forward rollout: x_{k+1} = A x_k + B u_k, u_k = -K_k x_k */
-        for ( int k = 0; k < N-1; ++k )
+        /* Forward rollout: x_{k+1} = A x_k + B u_k, u_k = -K_k x_k 
+         * Loop from k=0 to k=N-1 to compute all controls u[0]...u[N-1]
+         * and all states x[1]...x[N] (x[0] is given as initial condition)
+         */
+        for ( int k = 0; k < N; ++k )
         {
             real_t* A_k = mpcData.A;
             real_t* B_k = mpcData.B;
             real_t* K_k = &K[k * nu * nx];
 
-            /* u_k = -K_k x_k - k_k (affine feedback if gradient provided) */
+            /* u_k = -K_k x_k + k_k (affine feedback if gradient provided) */
             for ( int i = 0; i < nu; ++i )
             {
                 u_opt[k*nu + i] = 0.0;
                 for ( int j = 0; j < nx; ++j )
                     u_opt[k*nu + i] -= K_k[i*nx + j] * x_opt[k*nx + j];
                 
-                /* Add affine term if gradient was provided */
+                /* Standard affine LQR control law: u = -K*x - k_affine
+                 * Note: The sign is MINUS because k_affine is computed as:
+                 * k_affine = Sinv * (B'*v[k+1] + g_u[k])
+                 * where v[k] is the cost-to-go gradient (negative of desired direction)
+                 */
                 if ( g != 0 && k_affine != 0 )
-                    u_opt[k*nu + i] -= k_affine[k*nu + i];
+                {
+                    u_opt[k*nu + i] -= k_affine[k*nu + i];  // Standard affine LQR
+                    
+                    #ifndef __SUPPRESSANYOUTPUT__
+                    if (forward_pass_count <= 2 && k < 2 && i == 0) {
+                        printf("[RICCATI FORWARD k=%d] k_affine[%d] = %.4f, u_before = %.4f, u_after = %.4f\n",
+                               k, k*nu + i, k_affine[k*nu + i], 
+                               u_opt[k*nu + i] - k_affine[k*nu + i], u_opt[k*nu + i]);
+                    }
+                    #endif
+                }
             }
 
             /* x_{k+1} = A x_k + B u_k */
@@ -7435,107 +7898,161 @@ returnValue QProblem::setupMPCTQfactorisation( )
     
     /* Initialize T matrix (reverse triangular for active constraints) */
     int nAC = getNAC();
+    
+    #ifndef __SUPPRESSANYOUTPUT__
+    printf( "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" );
+    printf( "[MPC TQ] setupMPCTQfactorisation - Starting\n" );
+    printf( "[MPC TQ]   nAC=%d, nC_dyn=%d, nFR=%d, nV=%d\n", nAC, nC_dyn, nFR, nV );
+    printf( "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" );
+    
+    if ( nAC == 0 )
+    {
+        printf( "[MPC TQ] WARNING: No active constraints (nAC=0), returning early!\n" );
+        printf( "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" );
+    }
+    #endif
+    
     if ( nAC == 0 )
         return SUCCESSFUL_RETURN;  /* No active constraints yet */
     
     int tcol_start = sizeT - nAC;
-    for ( int i = 0; i < sizeT; ++i )
-    {
-        for ( int j = 0; j < sizeT; ++j )
-            T[i * sizeT + j] = 0.0;
-    }
-    
-    /* Get active constraint indices */
-    int_t* AC_idx;
-    constraints.getActive()->getNumberArray(&AC_idx);
-    
-    /* Process each active dynamics constraint sequentially (O(N) stages) */
-    for ( int k = 0; k < nAC && k < nC_dyn; ++k )
-    {
-        int constraint_idx = AC_idx[k];
-        
-        /* Extract constraint row: coefficients for this dynamics equation */
-        /* Row pattern: [0...0, -A, I, 0...0, B, 0...0] for stage k */
-        real_t* a_row = new real_t[nFR];
-        for ( int i = 0; i < nFR; ++i )
-            a_row[i] = 0.0;
-        
-        /* Get constraint row from matrix A */
-        A->getRow(constraint_idx, bounds.getFree(), 1.0, a_row);
-        
-        /* Compute w = a_row^T * Q (projection onto nullspace basis) */
-        real_t* w = new real_t[nFR];
-        for ( int j = 0; j < nFR; ++j )
-        {
-            w[j] = 0.0;
-            for ( int i = 0; i < nFR; ++i )
-            {
-                int ii = FR_idx[i];
-                w[j] += a_row[i] * Q[ii * nV + j];
-            }
-        }
-        
-        /* Apply Givens rotations to introduce zeros from left to right */
-        /* This maintains reverse triangular structure of T */
-        int nZ = getNZ();  /* Number of free variables not in active set */
-        
-        /* Zero out elements in nullspace part (first nZ columns) */
-        for ( int j = 0; j < nZ - 1; ++j )
-        {
-            if ( getAbs(w[j]) < EPS && getAbs(w[j+1]) < EPS )
-                continue;  /* Both already zero */
-            
-            /* Compute Givens rotation to zero w[j] */
-            real_t c, s, nu;
-            real_t w_new_j, w_new_jp1;
-            computeGivens(w[j+1], w[j], w_new_jp1, w_new_j, c, s);
-            nu = s / (1.0 + c);
-            
-            /* Update w */
-            w[j] = w_new_j;
-            w[j+1] = w_new_jp1;
-            
-            /* Apply rotation to Q matrix (only affects columns j and j+1) */
-            for ( int i = 0; i < nFR; ++i )
-            {
-                int ii = FR_idx[i];
-                real_t q_j = Q[ii * nV + j];
-                real_t q_jp1 = Q[ii * nV + j + 1];
-                
-                applyGivens(c, s, nu, q_jp1, q_j, Q[ii * nV + j + 1], Q[ii * nV + j]);
-            }
-            
-            /* Apply rotation to T matrix (affects previous constraints) */
-            for ( int i = 0; i < k; ++i )
-            {
-                real_t t_j = T[i * sizeT + (tcol_start - nZ + j)];
-                real_t t_jp1 = T[i * sizeT + (tcol_start - nZ + j + 1)];
-                
-                applyGivens(c, s, nu, t_jp1, t_j, 
-                           T[i * sizeT + (tcol_start - nZ + j + 1)], 
-                           T[i * sizeT + (tcol_start - nZ + j)]);
-            }
-        }
-        
-        /* Store last element in nullspace (now in reverse triangular position) */
-        if ( nZ > 0 )
-            T[k * sizeT + (tcol_start - 1)] = w[nZ - 1];
-        
-        /* Process active constraint part (wY = last nAC elements of w) */
-        /* These go directly into T without further rotations */
-        for ( int j = 0; j < k; ++j )
-        {
-            T[k * sizeT + (tcol_start + j)] = 0.0;
-            for ( int i = 0; i < nFR; ++i )
-            {
-                int ii = FR_idx[i];
-                T[k * sizeT + (tcol_start + j)] += a_row[i] * Q[ii * nV + nZ + j];
-            }
-        }
-        
-        delete[] w;
-        delete[] a_row;
-    }
+	
+	/* CRITICAL FIX: When nAC == sizeT (all constraints active), tcol_start = 0
+	 * This causes negative indices in T matrix access. Adjust storage layout. */
+	int nZ = getNZ();  /* Number of free variables not in active set */
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf( "[MPC TQ] T matrix layout: tcol_start=%d, nZ=%d, nAC=%d, sizeT=%d\n", 
+	        tcol_start, nZ, nAC, sizeT );
+	if ( tcol_start < nZ ) {
+		printf( "[MPC TQ] WARNING: tcol_start=%d < nZ=%d, adjusting to prevent negative indices\n", 
+		        tcol_start, nZ );
+	}
+	#endif
+	
+	/* Ensure tcol_start is at least nZ to prevent negative indexing */
+	if ( tcol_start < nZ )
+		tcol_start = nZ;
+	
+	for ( int i = 0; i < sizeT; ++i )
+	{
+		for ( int j = 0; j < sizeT; ++j )
+			T[i * sizeT + j] = 0.0;
+	}
+	
+	/* Get active constraint indices */
+	int_t* AC_idx;
+	constraints.getActive()->getNumberArray(&AC_idx);
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf( "[MPC TQ] Processing %d active constraints (min of nAC=%d and nC_dyn=%d)\n", 
+	        (nAC < nC_dyn ? nAC : nC_dyn), nAC, nC_dyn );
+	#endif
+	
+	/* Process each active dynamics constraint sequentially (O(N) stages) */
+	for ( int k = 0; k < nAC && k < nC_dyn; ++k )
+	{
+		int constraint_idx = AC_idx[k];
+		
+		#ifndef __SUPPRESSANYOUTPUT__
+		if ( k % 10 == 0 || k < 5 )
+			printf( "[MPC TQ] Processing constraint %d/%d (idx=%d)\n", k+1, (nAC < nC_dyn ? nAC : nC_dyn), constraint_idx );
+		#endif
+		
+		/* Extract constraint row: coefficients for this dynamics equation */
+		/* Row pattern: [0...0, -A, I, 0...0, B, 0...0] for stage k */
+		real_t* a_row = new real_t[nFR];
+		for ( int i = 0; i < nFR; ++i )
+			a_row[i] = 0.0;
+		
+		/* Get constraint row from matrix A */
+		A->getRow(constraint_idx, bounds.getFree(), 1.0, a_row);
+		
+		/* Compute w = a_row^T * Q (projection onto nullspace basis) */
+		real_t* w = new real_t[nFR];
+		for ( int j = 0; j < nFR; ++j )
+		{
+			w[j] = 0.0;
+			for ( int i = 0; i < nFR; ++i )
+			{
+				int ii = FR_idx[i];
+				w[j] += a_row[i] * Q[ii * nV + j];
+			}
+		}
+		
+		/* Apply Givens rotations to introduce zeros from left to right */
+		/* This maintains reverse triangular structure of T */
+		
+		/* Zero out elements in nullspace part (first nZ columns) */
+		for ( int j = 0; j < nZ - 1; ++j )
+		{
+			if ( getAbs(w[j]) < EPS && getAbs(w[j+1]) < EPS )
+				continue;  /* Both already zero */
+			
+			/* Compute Givens rotation to zero w[j] */
+			real_t c, s, nu;
+			real_t w_new_j, w_new_jp1;
+			computeGivens(w[j+1], w[j], w_new_jp1, w_new_j, c, s);
+			nu = s / (1.0 + c);
+			
+			/* Update w */
+			w[j] = w_new_j;
+			w[j+1] = w_new_jp1;
+			
+			/* Apply rotation to Q matrix (only affects columns j and j+1) */
+			for ( int i = 0; i < nFR; ++i )
+			{
+				int ii = FR_idx[i];
+				real_t q_j = Q[ii * nV + j];
+				real_t q_jp1 = Q[ii * nV + j + 1];
+				
+				applyGivens(c, s, nu, q_jp1, q_j, Q[ii * nV + j + 1], Q[ii * nV + j]);
+			}
+			
+			/* Apply rotation to T matrix (affects previous constraints) */
+			/* FIXED: Ensure indices are non-negative */
+			int t_col_j = tcol_start - nZ + j;
+			int t_col_jp1 = tcol_start - nZ + j + 1;
+			
+			if ( t_col_j >= 0 && t_col_jp1 >= 0 && t_col_jp1 < sizeT )
+			{
+				for ( int i = 0; i < k; ++i )
+				{
+					real_t t_j = T[i * sizeT + t_col_j];
+					real_t t_jp1 = T[i * sizeT + t_col_jp1];
+					
+					applyGivens(c, s, nu, t_jp1, t_j, 
+					           T[i * sizeT + t_col_jp1], 
+					           T[i * sizeT + t_col_j]);
+				}
+			}
+		}
+		
+		/* Store last element in nullspace (now in reverse triangular position) */
+		/* FIXED: Only store if index is valid */
+		int t_col_last = tcol_start - 1;
+		if ( nZ > 0 && t_col_last >= 0 && t_col_last < sizeT )
+			T[k * sizeT + t_col_last] = w[nZ - 1];
+		
+		/* Process active constraint part (wY = last nAC elements of w) */
+		/* These go directly into T without further rotations */
+		for ( int j = 0; j < k; ++j )
+		{
+			int t_col = tcol_start + j;
+			if ( t_col >= 0 && t_col < sizeT )
+			{
+				T[k * sizeT + t_col] = 0.0;
+				for ( int i = 0; i < nFR; ++i )
+				{
+					int ii = FR_idx[i];
+					T[k * sizeT + t_col] += a_row[i] * Q[ii * nV + nZ + j];
+				}
+			}
+		}
+		
+		delete[] w;
+		delete[] a_row;
+	}
     
     /* Factorization complete - Q and T now contain the TQ decomposition */
     /* Total complexity: O(N) × O(nx³) = O(N·nx³) for N stages, nx states */

@@ -461,7 +461,8 @@ class QProblem : public QProblemB
 	 *			RET_INVALID_ARGUMENTS */
 	returnValue solveRiccatiLQR(	real_t* x_opt,                  /**< Output: optimal state trajectory. */
 										real_t* u_opt,                  /**< Output: optimal control trajectory. */
-										const real_t* g = 0             /**< Optional: linear cost term (gradient vector). */
+										const real_t* g = 0,            /**< Optional: linear cost term (gradient vector). */
+										real_t* lambda_opt = 0          /**< Optional: output costates (dual variables). */
 										);
 		
 		/** Sets up auxiliary QP with dynamics-only active set using Riccati solution.

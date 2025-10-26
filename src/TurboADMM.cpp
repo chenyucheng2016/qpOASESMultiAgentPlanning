@@ -1094,7 +1094,11 @@ returnValue TurboADMM::setupAgentSolvers()
         // ========================================
         Options opts;
         opts.setToDefault();
-        opts.enableMPCRiccati = BT_TRUE;   // Enable Riccati warm start
+        // CRITICAL: Disable internal MPC Riccati for ADMM!
+        // We solve Riccati externally with ADMM coupling terms in the gradient.
+        // qpOASES's internal Riccati would overwrite our ADMM-aware costates.
+        // We only need setupMPCStructure() for TQ factorization structure.
+        opts.enableMPCRiccati = BT_FALSE;   // Disable internal Riccati (we solve externally)
         opts.enableEqualities = BT_TRUE;
         opts.printLevel = PL_NONE;
         agent_solvers_[i]->setOptions(opts);
@@ -1435,18 +1439,28 @@ returnValue TurboADMM::solveColdStart(
                 // Allocate separate buffers for Riccati
                 real_t* x_riccati = new real_t[(agent.N+1) * agent.nx];
                 real_t* u_riccati = new real_t[agent.N * agent.nu];
+                real_t* lambda_riccati = new real_t[agent.N * agent.nx];  // Costates for N stages
+                
+                printf("[DEBUG] Agent %d: Allocated lambda_riccati buffer (N=%d, nx=%d, size=%d)\n", 
+                       i, agent.N, agent.nx, agent.N * agent.nx);
                 
                 // Set initial state
                 for (int j = 0; j < agent.nx; ++j) {
                     x_riccati[j] = x_init[i][j];
                 }
                 
-                // Call Riccati to solve affine LQR
+                printf("[DEBUG] Agent %d: Calling solveRiccatiLQR with lambda_riccati...\n", i);
+                
+                // Call Riccati to solve affine LQR with costate output
                 returnValue ret_riccati = agent_solvers_[i]->solveRiccatiLQR(
-                    x_riccati,   // x_opt: separated state trajectory
-                    u_riccati,   // u_opt: separated control trajectory
-                    g            // Gradient for affine LQR
+                    x_riccati,       // x_opt: separated state trajectory
+                    u_riccati,       // u_opt: separated control trajectory
+                    g,               // Gradient for affine LQR
+                    lambda_riccati   // lambda_opt: costates (dual variables)
                 );
+                
+                printf("[DEBUG] Agent %d: solveRiccatiLQR returned %d (SUCCESSFUL_RETURN=%d)\n", 
+                       i, ret_riccati, SUCCESSFUL_RETURN);
                 
                 real_t* z_riccati = new real_t[agent.nV];
                 
@@ -1475,15 +1489,74 @@ returnValue TurboADMM::solveColdStart(
                     }
                 }
                 
-                // Clean up Riccati buffers
-                delete[] x_riccati;
-                delete[] u_riccati;
+                // ========================================
+                // Map Riccati costates to qpOASES dual variables
+                // ========================================
+                // qpOASES dual format: y = [y_bounds (nV), y_constraints (nC + nG)]
+                // - y_bounds[i]: dual for bound constraint on variable i
+                // - y_constraints[j]: dual for constraint j (dynamics + static)
+                
+                int nConstraints_total = agent.nC + agent.nG;
+                real_t* y_riccati = new real_t[agent.nV + nConstraints_total];
+                
+                printf("[DEBUG] Agent %d: Mapping costates to y_riccati (nV=%d, nC=%d, nG=%d)\n",
+                       i, agent.nV, agent.nC, agent.nG);
+                
+                // Initialize all duals to zero
+                memset(y_riccati, 0, (agent.nV + nConstraints_total) * sizeof(real_t));
+                
+                if (ret_riccati == SUCCESSFUL_RETURN) {
+                    // Map Riccati costates to dynamics constraint duals
+                    // CRITICAL: qpOASES has (N-1)*nx dynamics constraints (not N*nx!)
+                    // Dynamics: x[k+1] = A*x[k] + B*u[k] for k=0..N-2
+                    // Riccati: lambda[k] for k=0..N-1 (N stages)
+                    // We map lambda[0..N-2] to the (N-1) dynamics constraints
+                    
+                    int num_dynamics_constraints = agent.nC;  // Should be (N-1)*nx
+                    printf("[DEBUG] Agent %d: num_dynamics_constraints=%d, expected=(N-1)*nx=%d\n",
+                           i, num_dynamics_constraints, (agent.N-1)*agent.nx);
+                    
+                    // Map first (N-1) stages of costates
+                    // CRITICAL: Sign convention - qpOASES dual variables have opposite sign of Riccati costates
+                    // Riccati costate v_k is the cost-to-go gradient
+                    // qpOASES dual variable y_k is the Lagrange multiplier
+                    // They have opposite signs: y = -λ_riccati
+                    for (int k = 0; k < agent.N - 1; ++k) {
+                        for (int j = 0; j < agent.nx; ++j) {
+                            y_riccati[agent.nV + k*agent.nx + j] = lambda_riccati[k*agent.nx + j];  // Negative sign!
+                        }
+                    }
+                    // Note: lambda[N-1] (terminal costate) is NOT used because there's no x[N+1]
+                    
+                    printf("[DEBUG] Agent %d: Mapped %d costates to constraint duals (skipped terminal lambda[N-1])\n", 
+                           i, (agent.N-1) * agent.nx);
+                    printf("[DEBUG]   lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
+                           lambda_riccati[0], lambda_riccati[1], lambda_riccati[2], lambda_riccati[3]);
+                    printf("[DEBUG]   y_riccati[nV:nV+3]: [%.4f, %.4f, %.4f, %.4f]\n",
+                           y_riccati[agent.nV], y_riccati[agent.nV+1], y_riccati[agent.nV+2], y_riccati[agent.nV+3]);
+                }
                 
                 // ========================================
                 // Call init() with Riccati warm start
                 // ========================================
                 // NOTE: init() will call setupAuxiliaryWorkingSet() then setupMPCTQfactorisation()
                 // This ensures the TQ factorization is computed with the correct active constraints
+                
+                // ========================================
+                // VERIFICATION: Compare original gradient with auxiliary gradient
+                // ========================================
+                // Save original gradient before init() modifies it
+                real_t* g_original = new real_t[agent.nV];
+                memcpy(g_original, g, agent.nV * sizeof(real_t));
+                
+                printf("\n================================================================================\n");
+                printf("[GRADIENT VERIFICATION] Agent %d - COMPLETE COMPARISON\n", i);
+                printf("================================================================================\n");
+                printf("Original Riccati Gradient (input to Riccati):\n");
+                for (int j = 0; j < agent.nV; ++j) {
+                    printf("  g_orig[%3d] = %12.6f\n", j, g_original[j]);
+                }
+                printf("--------------------------------------------------------------------------------\n");
                 
                 int nWSR_before = nWSR;
                 ret = agent_solvers_[i]->init(
@@ -1492,11 +1565,101 @@ returnValue TurboADMM::solveColdStart(
                     lbA_combined, ubA_combined,
                     nWSR,
                     nullptr,     // cputime
-                    z_riccati,   // x0: Riccati solution as warm start
-                    nullptr,     // y0: Dual variables (let qpOASES compute)
+                    z_riccati,   // x0: Riccati primal solution
+                    y_riccati,   // y0: Riccati dual solution (costates)
                     nullptr,     // guessedBounds
                     nullptr      // guessedConstraints
                 );
+                
+                delete[] g_original;
+                
+                // ========================================
+                // Compare Riccati solution with final QP solution
+                // ========================================
+                printf("\n================================================================================\n");
+                printf("[TRAJECTORY COMPARISON] Agent %d - Riccati vs Final QP Solution\n", i);
+                printf("================================================================================\n");
+                
+                // Get final QP solution from qpOASES
+                real_t* z_final = new real_t[agent.nV];
+                agent_solvers_[i]->getPrimalSolution(z_final);
+                
+                // Compare trajectories stage by stage
+                printf("Stage | Riccati Solution (x, u)           | Final QP Solution (x, u)          | Difference\n");
+                printf("------+-----------------------------------+-----------------------------------+-----------\n");
+                
+                int idx_traj = 0;
+                real_t max_state_diff = 0.0;
+                real_t max_control_diff = 0.0;
+                
+                for (int k = 0; k <= agent.N; ++k) {
+                    // State comparison
+                    printf("  %2d  | x: [", k);
+                    for (int j = 0; j < agent.nx; ++j) {
+                        printf("%7.3f", z_riccati[idx_traj + j]);
+                        if (j < agent.nx - 1) printf(", ");
+                    }
+                    printf("] | x: [");
+                    for (int j = 0; j < agent.nx; ++j) {
+                        printf("%7.3f", z_final[idx_traj + j]);
+                        if (j < agent.nx - 1) printf(", ");
+                    }
+                    printf("] | ");
+                    
+                    // Compute state difference
+                    real_t state_diff = 0.0;
+                    for (int j = 0; j < agent.nx; ++j) {
+                        real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
+                        state_diff += diff * diff;
+                    }
+                    state_diff = sqrt(state_diff);
+                    if (state_diff > max_state_diff) max_state_diff = state_diff;
+                    printf("%.4f\n", state_diff);
+                    
+                    idx_traj += agent.nx;
+                    
+                    // Control comparison (only for k < N)
+                    if (k < agent.N) {
+                        printf("      | u: [");
+                        for (int j = 0; j < agent.nu; ++j) {
+                            printf("%7.3f", z_riccati[idx_traj + j]);
+                            if (j < agent.nu - 1) printf(", ");
+                        }
+                        printf("] | u: [");
+                        for (int j = 0; j < agent.nu; ++j) {
+                            printf("%7.3f", z_final[idx_traj + j]);
+                            if (j < agent.nu - 1) printf(", ");
+                        }
+                        printf("] | ");
+                        
+                        // Compute control difference
+                        real_t control_diff = 0.0;
+                        for (int j = 0; j < agent.nu; ++j) {
+                            real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
+                            control_diff += diff * diff;
+                        }
+                        control_diff = sqrt(control_diff);
+                        if (control_diff > max_control_diff) max_control_diff = control_diff;
+                        printf("%.4f\n", control_diff);
+                        
+                        idx_traj += agent.nu;
+                    }
+                }
+                
+                printf("--------------------------------------------------------------------------------\n");
+                printf("Summary:\n");
+                printf("  Max state difference:   %.6f\n", max_state_diff);
+                printf("  Max control difference: %.6f\n", max_control_diff);
+                printf("  QP iterations: %d\n", nWSR);
+                printf("================================================================================\n\n");
+                
+                delete[] z_final;
+                
+                // Clean up Riccati buffers AFTER init()
+                delete[] x_riccati;
+                delete[] u_riccati;
+                delete[] lambda_riccati;
+                delete[] y_riccati;
                 printf("[QP ITER] Agent %d, ADMM iter %d, init() with Riccati: %d iterations\n", i, admm_iter, nWSR);
                 printf("[QP RETURN CODE] Agent %d: init() returned code %d (SUCCESSFUL_RETURN=%d, RET_QP_SOLVED=%d)\n", i, ret, SUCCESSFUL_RETURN, RET_QP_SOLVED);
                 

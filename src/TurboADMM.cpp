@@ -1439,10 +1439,11 @@ returnValue TurboADMM::solveColdStart(
                 // Allocate separate buffers for Riccati
                 real_t* x_riccati = new real_t[(agent.N+1) * agent.nx];
                 real_t* u_riccati = new real_t[agent.N * agent.nu];
-                real_t* lambda_riccati = new real_t[agent.N * agent.nx];  // Costates for N stages
+                // CRITICAL: Need (N+1) stages for costates to include terminal stage λ[N]
+                real_t* lambda_riccati = new real_t[(agent.N+1) * agent.nx];  // Costates for N+1 stages (k=0 to N)
                 
                 printf("[DEBUG] Agent %d: Allocated lambda_riccati buffer (N=%d, nx=%d, size=%d)\n", 
-                       i, agent.N, agent.nx, agent.N * agent.nx);
+                       i, agent.N, agent.nx, (agent.N+1) * agent.nx);
                 
                 // Set initial state
                 for (int j = 0; j < agent.nx; ++j) {
@@ -1517,13 +1518,10 @@ returnValue TurboADMM::solveColdStart(
                            i, num_dynamics_constraints, (agent.N-1)*agent.nx);
                     
                     // Map first (N-1) stages of costates
-                    // CRITICAL: Sign convention - qpOASES dual variables have opposite sign of Riccati costates
-                    // Riccati costate v_k is the cost-to-go gradient
-                    // qpOASES dual variable y_k is the Lagrange multiplier
-                    // They have opposite signs: y = -λ_riccati
+                    // TESTING: Try positive sign (original)
                     for (int k = 0; k < agent.N - 1; ++k) {
                         for (int j = 0; j < agent.nx; ++j) {
-                            y_riccati[agent.nV + k*agent.nx + j] = lambda_riccati[k*agent.nx + j];  // Negative sign!
+                            y_riccati[agent.nV + k*agent.nx + j] = lambda_riccati[k*agent.nx + j];  // TEST: Positive sign
                         }
                     }
                     // Note: lambda[N-1] (terminal costate) is NOT used because there's no x[N+1]
@@ -1543,35 +1541,28 @@ returnValue TurboADMM::solveColdStart(
                 // This ensures the TQ factorization is computed with the correct active constraints
                 
                 // ========================================
-                // VERIFICATION: Compare original gradient with auxiliary gradient
+                // VERIFICATION: Log original gradient before init()
                 // ========================================
-                // Save original gradient before init() modifies it
-                real_t* g_original = new real_t[agent.nV];
-                memcpy(g_original, g, agent.nV * sizeof(real_t));
+                // printf("\n================================================================================\n");
+                // printf("[GRADIENT VERIFICATION] Agent %d - Original Gradient\n", i);
+                // printf("================================================================================\n");
+                // printf("Original Riccati Gradient (input to init):\n");
+                // for (int j = 0; j < agent.nV; ++j) {
+                //     printf("  g[%3d] = %12.6f\n", j, g[j]);
+                // }
+                // printf("--------------------------------------------------------------------------------\n");
                 
-                printf("\n================================================================================\n");
-                printf("[GRADIENT VERIFICATION] Agent %d - COMPLETE COMPARISON\n", i);
-                printf("================================================================================\n");
-                printf("Original Riccati Gradient (input to Riccati):\n");
-                for (int j = 0; j < agent.nV; ++j) {
-                    printf("  g_orig[%3d] = %12.6f\n", j, g_original[j]);
-                }
-                printf("--------------------------------------------------------------------------------\n");
-                
-                int nWSR_before = nWSR;
                 ret = agent_solvers_[i]->init(
                     H, g, A_constraint,
                     lb_local, ub_local,  // Use local bounds with fixed x0
                     lbA_combined, ubA_combined,
                     nWSR,
                     nullptr,     // cputime
-                    z_riccati,   // x0: Riccati primal solution
-                    y_riccati,   // y0: Riccati dual solution (costates)
+                    nullptr,   // x0: Riccati primal solution
+                    nullptr,   // y0: Riccati dual solution (costates)
                     nullptr,     // guessedBounds
                     nullptr      // guessedConstraints
                 );
-                
-                delete[] g_original;
                 
                 // ========================================
                 // Compare Riccati solution with final QP solution

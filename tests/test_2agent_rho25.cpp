@@ -152,6 +152,26 @@ int main()
     admm.getSolution(0, z0);
     admm.getSolution(1, z1);
     
+    // Print final QP solution for Agent 0 in same format as Riccati trajectory
+    printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    printf("[FINAL QP SOLUTION] Agent 0 - Converged Solution\n");
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    printf("Stage |   x[k]   |   u[k]   |\n");
+    printf("------+----------+----------+\n");
+    for (int k = 0; k < N; ++k) {
+        int idx = k * (nx + nu);
+        printf("  %2d  | (%6.2f, %6.2f, %6.2f, %6.2f) | (%6.2f, %6.2f)\n",
+               k,
+               z0[idx], z0[idx+1], z0[idx+2], z0[idx+3],
+               z0[idx+4], z0[idx+5]);
+    }
+    // Terminal state
+    int idx_N = N * (nx + nu);
+    printf("  %2d  | (%6.2f, %6.2f, %6.2f, %6.2f) | (terminal)\n",
+           N,
+           z0[idx_N], z0[idx_N+1], z0[idx_N+2], z0[idx_N+3]);
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+    
     // Analyze results
     printf("Trajectory Analysis:\n");
     printf("Stage | Agent 0 Pos    | Agent 1 Pos    | Distance | Status\n");

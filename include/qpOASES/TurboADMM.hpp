@@ -521,6 +521,9 @@ private:
     real_t** z_local_;          /**< Local primal variables (per agent) */
     real_t** z_prev_;           /**< Previous solutions (for warm start) */
     
+    // Riccati solution storage (for comparison with final QP solution)
+    real_t** z_riccati_;        /**< Riccati LQR solution (per agent) */
+    
     // Collision coupling variables (coupling-constraint ADMM)
     int** neighbors_;           /**< Neighbor graph: neighbors_[i] = list of neighbors for agent i */
     int* num_neighbors_;        /**< Number of neighbors per agent */

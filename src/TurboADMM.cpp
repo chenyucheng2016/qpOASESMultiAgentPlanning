@@ -1450,6 +1450,8 @@ returnValue TurboADMM::solveColdStart(
                     x_riccati[j] = x_init[i][j];
                 }
                 
+                printf("[DEBUG] Agent %d: Initial state set to x_riccati[0:3] = [%.4f, %.4f, %.4f, %.4f]\n",
+                       i, x_riccati[0], x_riccati[1], x_riccati[2], x_riccati[3]);
                 printf("[DEBUG] Agent %d: Calling solveRiccatiLQR with lambda_riccati...\n", i);
                 
                 // Call Riccati to solve affine LQR with costate output

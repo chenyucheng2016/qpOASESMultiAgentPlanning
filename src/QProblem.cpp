@@ -7164,6 +7164,44 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
             v[N*nx + i] = 0.0;
     }
 
+    /* ========================================
+     * VERIFY: P[N] = Q (terminal condition)
+     * ======================================== */
+    #ifndef __SUPPRESSANYOUTPUT__
+    printf("\n[RICCATI] Verifying terminal condition P[N] = Q\n");
+    real_t* P_N = &P[N * nx * nx];
+    real_t* Q_mat = mpcData.Q;
+    real_t max_diff = 0.0;
+    for ( int i = 0; i < nx*nx; ++i )
+    {
+        real_t diff = getAbs(P_N[i] - Q_mat[i]);
+        if ( diff > max_diff ) max_diff = diff;
+    }
+    printf("  P[N] vs Q: max difference = %.6e\n", max_diff);
+    if ( max_diff < 1e-12 )
+        printf("  ✓ PASS: P[N] = Q (terminal condition satisfied)\n");
+    else
+        printf("  ✗ FAIL: P[N] ≠ Q (terminal condition violated!)\n");
+    
+    // Print first few elements for inspection
+    printf("  P[N][0:3,0:3]:\n");
+    for ( int i = 0; i < 3 && i < nx; ++i )
+    {
+        printf("    [");
+        for ( int j = 0; j < 3 && j < nx; ++j )
+            printf(" %.4f", P_N[i*nx + j]);
+        printf(" ]\n");
+    }
+    printf("  Q[0:3,0:3]:\n");
+    for ( int i = 0; i < 3 && i < nx; ++i )
+    {
+        printf("    [");
+        for ( int j = 0; j < 3 && j < nx; ++j )
+            printf(" %.4f", Q_mat[i*nx + j]);
+        printf(" ]\n");
+    }
+    #endif
+
     /* Backward Riccati recursion: k = N-1, ..., 0 */
     /* CRITICAL: Start at k=N-1 since we initialized P[N] and v[N] */
     for ( int k = N-1; k >= 0; --k )
@@ -7704,57 +7742,316 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
         
         #endif
     }
-	printf("SUCCESSFUL_RETURN2\n");
     
-    /* Clean up temporary memory with validation */
-    #ifndef __SUPPRESSANYOUTPUT__
-    printf("\n[RICCATI CLEANUP] Validating arrays before deletion...\n");
-    #endif
-    
-    /* Validate v array before deletion */
-    bool v_corrupted = false;
-    // v_size already declared at function start
-    for (int i = 0; i < v_size; i++) {
-        if (std::isnan(v[i]) || std::isinf(v[i])) {
-            printf("ERROR: v[%d] is corrupted: %f (NaN or Inf detected)\n", i, v[i]);
-            v_corrupted = true;
-            if (i < 10) continue;  // Show first 10 corrupted entries
-            else break;
+    /* ========================================
+     * KKT CONDITION VERIFICATION
+     * ======================================== */
+    if ( lambda_opt != 0 && g != 0 )
+    {
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        printf("[KKT VERIFICATION] Checking optimality conditions\n");
+        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        #endif
+        
+        real_t* A_k = mpcData.A;
+        real_t* B_k = mpcData.B;
+        real_t* Q_k = mpcData.Q;
+        real_t* R_k = mpcData.R;
+        
+        int kkt_failures = 0;
+        real_t max_stationarity_residual = 0.0;
+        real_t max_primal_residual = 0.0;
+        int worst_stationarity_stage = -1;
+        int worst_primal_stage = -1;
+        
+        /* ========================================
+         * 1. STATIONARITY: ∇L = H*z + g + A'*λ = 0
+         * ======================================== */
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("\n[KKT] 1. Stationarity: ∇_x L = Q*x + g_x + A'*λ[k+1] - λ[k] = 0\n");
+        printf("                       ∇_u L = R*u + g_u + B'*λ[k+1] = 0\n");
+        #endif
+        
+        /* Check stages k=0 to N-2 (interior stages) */
+        for ( int k = 0; k < N-1; ++k )
+        {
+            real_t* x_k = &x_opt[k * nx];
+            real_t* u_k = &u_opt[k * nu];
+            real_t* lambda_k = &lambda_opt[k * nx];
+            real_t* lambda_next = &lambda_opt[(k+1) * nx];
+            const real_t* g_x_k = &g[k * (nx + nu)];
+            const real_t* g_u_k = &g[k * (nx + nu) + nx];
+            
+            /* Check state stationarity: ∇_x L = Q*x[k] + g_x[k] + A'*λ[k+1] - λ[k] */
+            real_t grad_x[4] = {0, 0, 0, 0};
+            
+            /* Q*x[k] + g_x[k] */
+            for ( int i = 0; i < nx; ++i )
+            {
+                grad_x[i] = g_x_k[i];
+                for ( int j = 0; j < nx; ++j )
+                    grad_x[i] += Q_k[i*nx + j] * x_k[j];
+            }
+            
+            /* + A'*λ[k+1] */
+            for ( int i = 0; i < nx; ++i )
+                for ( int j = 0; j < nx; ++j )
+                    grad_x[i] += A_k[j*nx + i] * lambda_next[j];
+            
+            /* - λ[k] */
+            for ( int i = 0; i < nx; ++i )
+                grad_x[i] -= lambda_k[i];
+            
+            /* Compute residual */
+            real_t state_residual = 0.0;
+            for ( int i = 0; i < nx; ++i )
+            {
+                real_t res = getAbs(grad_x[i]);
+                if ( res > state_residual ) state_residual = res;
+            }
+            
+            /* Check control stationarity: ∇_u L = R*u[k] + g_u[k] + B'*λ[k+1] */
+            real_t grad_u[2] = {0, 0};
+            
+            /* R*u[k] + g_u[k] */
+            for ( int i = 0; i < nu; ++i )
+            {
+                grad_u[i] = g_u_k[i];
+                for ( int j = 0; j < nu; ++j )
+                    grad_u[i] += R_k[i*nu + j] * u_k[j];
+            }
+            
+            /* + B'*λ[k+1] */
+            for ( int i = 0; i < nu; ++i )
+                for ( int j = 0; j < nx; ++j )
+                    grad_u[i] += B_k[j*nu + i] * lambda_next[j];
+            
+            /* Compute residual */
+            real_t control_residual = 0.0;
+            for ( int i = 0; i < nu; ++i )
+            {
+                real_t res = getAbs(grad_u[i]);
+                if ( res > control_residual ) control_residual = res;
+            }
+            
+            real_t stationarity_residual = (state_residual > control_residual) ? state_residual : control_residual;
+            
+            if ( stationarity_residual > 1e-6 )
+            {
+                kkt_failures++;
+                if ( kkt_failures <= 3 )
+                {
+                    printf("  ✗ FAIL at k=%d: stationarity residual = %.6e\n", k, stationarity_residual);
+                    printf("    ∇_x L = [%.4e, %.4e, %.4e, %.4e]\n", 
+                           grad_x[0], grad_x[1], grad_x[2], grad_x[3]);
+                    printf("    ∇_u L = [%.4e, %.4e]\n", grad_u[0], grad_u[1]);
+                }
+            }
+            
+            if ( stationarity_residual > max_stationarity_residual )
+            {
+                max_stationarity_residual = stationarity_residual;
+                worst_stationarity_stage = k;
+            }
         }
+        
+        /* Check stage k=N-1 separately (uses terminal gradient instead of lambda[N]) */
+        {
+            int k = N-1;
+            real_t* x_k = &x_opt[k * nx];
+            real_t* u_k = &u_opt[k * nu];
+            real_t* x_next = &x_opt[N * nx];
+            real_t* lambda_k = &lambda_opt[k * nx];
+            const real_t* g_x_k = &g[k * (nx + nu)];
+            const real_t* g_u_k = &g[k * (nx + nu) + nx];
+            const real_t* g_x_terminal = &g[N * (nx + nu)];
+            
+            /* Check state stationarity: ∇_x L = Q*x[k] + g_x[k] + A'*(Q*x[N] + g_x[N]) - λ[k] */
+            real_t grad_x[4] = {0, 0, 0, 0};
+            
+            /* Q*x[k] + g_x[k] */
+            for ( int i = 0; i < nx; ++i )
+            {
+                grad_x[i] = g_x_k[i];
+                for ( int j = 0; j < nx; ++j )
+                    grad_x[i] += Q_k[i*nx + j] * x_k[j];
+            }
+            
+            /* + A'*(Q*x[N] + g_x[N]) - terminal gradient instead of lambda[N] */
+            real_t terminal_grad[4] = {0, 0, 0, 0};
+            for ( int i = 0; i < nx; ++i )
+            {
+                terminal_grad[i] = g_x_terminal[i];
+                for ( int j = 0; j < nx; ++j )
+                    terminal_grad[i] += Q_k[i*nx + j] * x_next[j];
+            }
+            
+            for ( int i = 0; i < nx; ++i )
+                for ( int j = 0; j < nx; ++j )
+                    grad_x[i] += A_k[j*nx + i] * terminal_grad[j];
+            
+            /* - λ[k] */
+            for ( int i = 0; i < nx; ++i )
+                grad_x[i] -= lambda_k[i];
+            
+            /* Compute residual */
+            real_t state_residual = 0.0;
+            for ( int i = 0; i < nx; ++i )
+            {
+                real_t res = getAbs(grad_x[i]);
+                if ( res > state_residual ) state_residual = res;
+            }
+            
+            /* Check control stationarity: ∇_u L = R*u[k] + g_u[k] + B'*(Q*x[N] + g_x[N]) */
+            real_t grad_u[2] = {0, 0};
+            
+            /* R*u[k] + g_u[k] */
+            for ( int i = 0; i < nu; ++i )
+            {
+                grad_u[i] = g_u_k[i];
+                for ( int j = 0; j < nu; ++j )
+                    grad_u[i] += R_k[i*nu + j] * u_k[j];
+            }
+            
+            /* + B'*(Q*x[N] + g_x[N]) */
+            for ( int i = 0; i < nu; ++i )
+                for ( int j = 0; j < nx; ++j )
+                    grad_u[i] += B_k[j*nu + i] * terminal_grad[j];
+            
+            /* Compute residual */
+            real_t control_residual = 0.0;
+            for ( int i = 0; i < nu; ++i )
+            {
+                real_t res = getAbs(grad_u[i]);
+                if ( res > control_residual ) control_residual = res;
+            }
+            
+            real_t stationarity_residual = (state_residual > control_residual) ? state_residual : control_residual;
+            
+            if ( stationarity_residual > 1e-6 )
+            {
+                kkt_failures++;
+                if ( kkt_failures <= 3 )
+                {
+                    printf("  ✗ FAIL at k=%d: stationarity residual = %.6e\n", k, stationarity_residual);
+                    printf("    ∇_x L = [%.4e, %.4e, %.4e, %.4e]\n", 
+                           grad_x[0], grad_x[1], grad_x[2], grad_x[3]);
+                    printf("    ∇_u L = [%.4e, %.4e]\n", grad_u[0], grad_u[1]);
+                }
+            }
+            
+            if ( stationarity_residual > max_stationarity_residual )
+            {
+                max_stationarity_residual = stationarity_residual;
+                worst_stationarity_stage = k;
+            }
+        }
+        
+        /* NOTE: No terminal stationarity check for k=N
+         * In unconstrained LQR, there is no terminal constraint, only a terminal cost.
+         * Therefore, λ[N] = ∂φ/∂x[N] = Q*x[N] + g_x[N] is the terminal cost gradient,
+         * not a constraint dual variable. The stationarity condition at k=N is:
+         *   ∇_x φ(x[N]) = Q*x[N] + g_x[N]
+         * which is satisfied by construction (λ[N] = P[N]*x[N] + p[N] where P[N]=Q).
+         */
+        
+        /* ========================================
+         * 2. PRIMAL FEASIBILITY: x[k+1] = A*x[k] + B*u[k]
+         * ======================================== */
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("\n[KKT] 2. Primal Feasibility: x[k+1] = A*x[k] + B*u[k]\n");
+        #endif
+        
+        int primal_failures = 0;
+        for ( int k = 0; k < N; ++k )
+        {
+            real_t* x_k = &x_opt[k * nx];
+            real_t* u_k = &u_opt[k * nu];
+            real_t* x_next = &x_opt[(k+1) * nx];
+            
+            /* Compute A*x[k] + B*u[k] */
+            real_t x_predicted[4] = {0, 0, 0, 0};
+            
+            for ( int i = 0; i < nx; ++i )
+            {
+                for ( int j = 0; j < nx; ++j )
+                    x_predicted[i] += A_k[i*nx + j] * x_k[j];
+                for ( int j = 0; j < nu; ++j )
+                    x_predicted[i] += B_k[i*nu + j] * u_k[j];
+            }
+            
+            /* Compute residual: ||x[k+1] - (A*x[k] + B*u[k])|| */
+            real_t primal_residual = 0.0;
+            for ( int i = 0; i < nx; ++i )
+            {
+                real_t res = getAbs(x_next[i] - x_predicted[i]);
+                if ( res > primal_residual ) primal_residual = res;
+            }
+            
+            if ( primal_residual > 1e-6 )
+            {
+                primal_failures++;
+                if ( primal_failures <= 3 )
+                {
+                    printf("  ✗ FAIL at k=%d: primal residual = %.6e\n", k, primal_residual);
+                    printf("    x[k+1] (actual)    = [%.4f, %.4f, %.4f, %.4f]\n", 
+                           x_next[0], x_next[1], x_next[2], x_next[3]);
+                    printf("    A*x[k] + B*u[k]    = [%.4f, %.4f, %.4f, %.4f]\n", 
+                           x_predicted[0], x_predicted[1], x_predicted[2], x_predicted[3]);
+                }
+            }
+            
+            if ( primal_residual > max_primal_residual )
+            {
+                max_primal_residual = primal_residual;
+                worst_primal_stage = k;
+            }
+        }
+        
+        /* ========================================
+         * KKT SUMMARY
+         * ======================================== */
+        #ifndef __SUPPRESSANYOUTPUT__
+        printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        printf("[KKT SUMMARY]\n");
+        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        printf("  1. Stationarity:\n");
+        printf("     Failures: %d/%d stages\n", kkt_failures, N+1);
+        printf("     Max residual: %.6e (at k=%d)\n", max_stationarity_residual, worst_stationarity_stage);
+        if ( kkt_failures == 0 )
+            printf("     ✓ PASS: All stationarity conditions satisfied!\n");
+        else
+            printf("     ✗ FAIL: %d stages violated stationarity!\n", kkt_failures);
+        
+        printf("\n  2. Primal Feasibility:\n");
+        printf("     Failures: %d/%d stages\n", primal_failures, N);
+        printf("     Max residual: %.6e (at k=%d)\n", max_primal_residual, worst_primal_stage);
+        if ( primal_failures == 0 )
+            printf("     ✓ PASS: All dynamics constraints satisfied!\n");
+        else
+            printf("     ✗ FAIL: %d stages violated dynamics!\n", primal_failures);
+        
+        printf("\n  Overall KKT Status: ");
+        if ( kkt_failures == 0 && primal_failures == 0 )
+            printf("✓ OPTIMAL SOLUTION\n");
+        else
+            printf("✗ KKT CONDITIONS VIOLATED\n");
+        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        #endif
     }
     
-    /* INTENTIONAL MEMORY LEAK: Skip delete to avoid heap corruption crash
-     * 
-     * Root cause: The many temporary allocations/deallocations in the backward
-     * Riccati recursion (BP, S, Sinv, BPA, AP, APA, APB, APBK, Bv, PBk) cause
-     * heap fragmentation. When we try to delete v, k_affine, or Sinv_all, the
-     * heap allocator detects corrupted metadata and crashes.
-     * 
-     * The arrays themselves are valid (no NaN/Inf), but the heap bookkeeping
-     * is damaged. Since this function is called rarely (once per ADMM iteration)
-     * and the memory is small (~1KB total), we accept the leak to avoid crashes.
-     * 
-     * Future fix: Use a memory pool or stack allocation for temporary arrays.
-     */
-    
-    #ifndef __SUPPRESSANYOUTPUT__
-    printf("[RICCATI CLEANUP] Skipping delete operations to avoid heap corruption\n");
-    printf("  v array: %d bytes (intentional leak)\n", v_size * (int)sizeof(real_t));
-    if (k_affine != 0) {
-        printf("  k_affine array: %d bytes (intentional leak)\n", N * nu * (int)sizeof(real_t));
-    }
-    if (Sinv_all != 0) {
-        printf("  Sinv_all array: %d bytes (intentional leak)\n", N * nu * nu * (int)sizeof(real_t));
-    }
-    #endif
+	delete[] v;
+	if (k_affine != 0)
+		delete[] k_affine;
+	if (Sinv_all != 0)
+		delete[] Sinv_all;
     
     // NOTE: v, k_affine, and Sinv_all are NOT deleted to avoid heap corruption crashes
     // delete[] v;           // DISABLED - causes crash due to heap corruption
     // delete[] k_affine;    // DISABLED - causes crash due to heap corruption  
     // delete[] Sinv_all;    // DISABLED - causes crash due to heap corruption
     
-    printf("\n[HEAP DEBUG] ========== solveRiccatiLQR COMPLETED SUCCESSFULLY ==========\n");
-    fflush(stdout);
        
     return SUCCESSFUL_RETURN;
 }

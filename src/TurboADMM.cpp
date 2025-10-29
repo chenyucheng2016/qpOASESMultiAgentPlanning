@@ -269,7 +269,9 @@ returnValue AgentData::allocate(int N_, int nx_, int nu_)
     // MPC structure: [x0, u0, x1, u1, ..., x_{N-1}, u_{N-1}, x_N]
     // = N stages of [x, u] + terminal state x_N
     nV = N * (nx + nu) + nx;
-    nC = (N - 1) * nx;
+    // CORRECTED: N dynamics constraints (not N-1) for proper MPC formulation
+    // Constraints: x[1]=A*x[0]+B*u[0], ..., x[N]=A*x[N-1]+B*u[N-1]
+    nC = N * nx;
     
     // Allocate matrices
     A = new real_t[nx * nx];
@@ -1361,7 +1363,9 @@ returnValue TurboADMM::solveColdStart(
                 // Part 1: Dynamics constraints (rows 0 to nC-1)
                 // Dynamics: x[k+1] = A*x[k] + B*u[k]
                 // Constraint: -x[k+1] + A*x[k] + B*u[k] = 0
-                for (int k = 0; k < agent.N - 1; ++k) {
+                // CORRECTED: Use N constraints (k=0 to N-1) for proper MPC formulation
+                // This includes the terminal dynamics constraint: x[N] = A*x[N-1] + B*u[N-1]
+                for (int k = 0; k < agent.N; ++k) {
                     int row_offset = k * agent.nx;
                     int col_x_k = k * (agent.nx + agent.nu);
                     int col_u_k = col_x_k + agent.nx;
@@ -1510,28 +1514,36 @@ returnValue TurboADMM::solveColdStart(
                 
                 if (ret_riccati == SUCCESSFUL_RETURN) {
                     // Map Riccati costates to dynamics constraint duals
-                    // CRITICAL: qpOASES has (N-1)*nx dynamics constraints (not N*nx!)
-                    // Dynamics: x[k+1] = A*x[k] + B*u[k] for k=0..N-2
-                    // Riccati: lambda[k] for k=0..N-1 (N stages)
-                    // We map lambda[0..N-2] to the (N-1) dynamics constraints
+                    // CRITICAL MAPPING:
+                    // - We have N dynamics constraints: x[k+1] = A*x[k] + B*u[k] for k=0..N-1
+                    // - Riccati produces N+1 costates: λ[0], λ[1], ..., λ[N]
+                    // - Constraint k (x[k+1] = ...) has dual = λ[k+1]
+                    // - So we map λ[1] through λ[N] to constraints 0 through N-1
+                    // - λ[0] is NOT used (no constraint for initial state x[0])
                     
-                    int num_dynamics_constraints = agent.nC;  // Should be (N-1)*nx
-                    printf("[DEBUG] Agent %d: num_dynamics_constraints=%d, expected=(N-1)*nx=%d\n",
-                           i, num_dynamics_constraints, (agent.N-1)*agent.nx);
+                    int num_dynamics_constraints = agent.nC;  // Should be N*nx
+                    printf("[DEBUG] Agent %d: num_dynamics_constraints=%d, expected=N*nx=%d\n",
+                           i, num_dynamics_constraints, agent.N*agent.nx);
                     
-                    // Map first (N-1) stages of costates
-                    // TESTING: Try positive sign (original)
-                    for (int k = 0; k < agent.N - 1; ++k) {
+                    // Map costates λ[1] through λ[N] to constraints 0 through N-1
+                    // CRITICAL: Test sign convention
+                    // Constraint: -x[k+1] + A*x[k] + B*u[k] = 0
+                    // KKT: ∂L/∂x[k+1] = H*x[k+1] + g[k+1] - μ[k] = 0  (μ[k] is dual for constraint k)
+                    // Riccati: λ[k+1] = ∂J/∂x[k+1]
+                    // Testing: Try NEGATIVE sign to match qpOASES convention
+                    for (int k = 0; k < agent.N; ++k) {  // k = 0 to N-1 (N constraints)
                         for (int j = 0; j < agent.nx; ++j) {
-                            y_riccati[agent.nV + k*agent.nx + j] = lambda_riccati[k*agent.nx + j];  // TEST: Positive sign
+                            // Constraint k corresponds to λ[k+1]
+                            // TEST: Negate the costate
+                            y_riccati[agent.nV + k*agent.nx + j] = -lambda_riccati[(k+1)*agent.nx + j];
                         }
                     }
-                    // Note: lambda[N-1] (terminal costate) is NOT used because there's no x[N+1]
                     
-                    printf("[DEBUG] Agent %d: Mapped %d costates to constraint duals (skipped terminal lambda[N-1])\n", 
-                           i, (agent.N-1) * agent.nx);
-                    printf("[DEBUG]   lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
-                           lambda_riccati[0], lambda_riccati[1], lambda_riccati[2], lambda_riccati[3]);
+                    printf("[DEBUG] Agent %d: Mapped %d costates (λ[1] through λ[N]) to %d constraint duals\n", 
+                           i, agent.N * agent.nx, num_dynamics_constraints);
+                    printf("[DEBUG]   lambda[1]: [%.4f, %.4f, %.4f, %.4f]\n",
+                           lambda_riccati[agent.nx], lambda_riccati[agent.nx+1], 
+                           lambda_riccati[agent.nx+2], lambda_riccati[agent.nx+3]);
                     printf("[DEBUG]   y_riccati[nV:nV+3]: [%.4f, %.4f, %.4f, %.4f]\n",
                            y_riccati[agent.nV], y_riccati[agent.nV+1], y_riccati[agent.nV+2], y_riccati[agent.nV+3]);
                 }
@@ -1560,8 +1572,8 @@ returnValue TurboADMM::solveColdStart(
                     lbA_combined, ubA_combined,
                     nWSR,
                     nullptr,     // cputime
-                    nullptr,   // x0: Riccati primal solution
-                    nullptr,   // y0: Riccati dual solution (costates)
+                    z_riccati,   // x0: Riccati primal solution
+                    y_riccati,   // y0: Riccati dual solution (costates)
                     nullptr,     // guessedBounds
                     nullptr      // guessedConstraints
                 );

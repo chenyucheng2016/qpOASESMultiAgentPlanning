@@ -1558,12 +1558,93 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 
 	/* ... and setup QP data of an auxiliary QP having an optimal solution
 	 * as specified by the user (or xOpt = yOpt = 0, by default). */
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	printf("[GRADIENT COMPARISON] Original gradient g_original[0:9] (passed to qpOASES):\n");
+	for( i=0; i<10; ++i )
+	{
+		printf("  g_original[%d] = %.6f\n", i, g_original[i]);
+	}
+	printf("\n[BOUND STATUS] Checking which variables have equality bounds (lb == ub):\n");
+	for( i=0; i<10; ++i )
+	{
+		BooleanType is_fixed = (fabs(lb_original[i] - ub_original[i]) < 1e-10) ? BT_TRUE : BT_FALSE;
+		printf("  Var[%d]: lb=%.6f, ub=%.6f, fixed=%s\n", 
+		       i, lb_original[i], ub_original[i], (is_fixed == BT_TRUE) ? "YES" : "NO");
+	}
+	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	#endif
+	
 	if ( setupAuxiliaryQPgradient( ) != SUCCESSFUL_RETURN )
 	{
 		delete[] ubA_original; delete[] lbA_original; delete[] ub_original; delete[] lb_original; delete[] g_original;
 		return THROWERROR( RET_INIT_FAILED );
 	}
-
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	printf("[GRADIENT COMPARISON] Comparing g_original vs recovered g (BEFORE FIX):\n");
+	printf("Index | g_original    | g_recovered   | Difference    | Rel Error  | Fixed?\n");
+	printf("------+---------------+---------------+---------------+------------+--------\n");
+	for( i=0; i<10; ++i )
+	{
+		real_t diff = g_original[i] - g[i];
+		real_t rel_err = (fabs(g_original[i]) > 1e-10) ? fabs(diff / g_original[i]) : 0.0;
+		BooleanType is_fixed = (fabs(lb_original[i] - ub_original[i]) < 1e-10) ? BT_TRUE : BT_FALSE;
+		printf("  %2d  | %13.6f | %13.6f | %13.6f | %10.2e | %s\n", 
+		       i, g_original[i], g[i], diff, rel_err, (is_fixed == BT_TRUE) ? "YES" : "NO");
+	}
+	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	#endif
+	
+	/* ========================================
+	 * FIX: Restore original gradient for FIXED variables
+	 * For variables with equality bounds (lb[i] == ub[i]), the KKT recovery
+	 * formula g = yB - H*x + A'*yC is invalid. We must keep the original gradient.
+	 * ======================================== */
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("\n[GRADIENT FIX] Restoring original gradient for fixed variables...\n");
+	int num_fixed = 0;
+	#endif
+	
+	for( i=0; i<nV; ++i )
+	{
+		// Check if variable is fixed by equality bounds
+		if ( fabs(lb_original[i] - ub_original[i]) < 1e-10 )
+		{
+			#ifndef __SUPPRESSANYOUTPUT__
+			if ( i < 10 ) {
+				printf("  Var[%d]: FIXED (lb=%.6f, ub=%.6f), restoring g[%d]: %.6f -> %.6f\n",
+				       i, lb_original[i], ub_original[i], i, g[i], g_original[i]);
+			}
+			num_fixed++;
+			#endif
+			
+			// Restore original gradient for fixed variable
+			g[i] = g_original[i];
+		}
+	}
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("[GRADIENT FIX] Restored gradient for %d fixed variables\n\n", num_fixed);
+	
+	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	printf("[GRADIENT COMPARISON] Comparing g_original vs recovered g (AFTER FIX):\n");
+	printf("Index | g_original    | g_recovered   | Difference    | Rel Error  | Fixed?\n");
+	printf("------+---------------+---------------+---------------+------------+--------\n");
+	for( i=0; i<10; ++i )
+	{
+		real_t diff = g_original[i] - g[i];
+		real_t rel_err = (fabs(g_original[i]) > 1e-10) ? fabs(diff / g_original[i]) : 0.0;
+		BooleanType is_fixed = (fabs(lb_original[i] - ub_original[i]) < 1e-10) ? BT_TRUE : BT_FALSE;
+		printf("  %2d  | %13.6f | %13.6f | %13.6f | %10.2e | %s\n", 
+		       i, g_original[i], g[i], diff, rel_err, (is_fixed == BT_TRUE) ? "YES" : "NO");
+	}
+	printf("\n[ANALYSIS] Fixed variables now have matching gradients!\n");
+	printf("           Remaining differences are in FREE variables (may need further investigation).\n");
+	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	#endif
 	if ( setupAuxiliaryQPbounds( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
 	{
 		delete[] ubA_original; delete[] lbA_original; delete[] ub_original; delete[] lb_original; delete[] g_original;
@@ -2976,6 +3057,17 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 
 	/* Setup gradient vector: g = -H*x + [Id A]'*[yB yC]
 	 *                          = yB - H*x + A'*yC. */
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("\n[GRADIENT RECOVERY DEBUG] Starting setupAuxiliaryQPgradient\n");
+	printf("[GRADIENT RECOVERY] Input x[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+	       x[0], x[1], x[2], x[3], x[4], x[5]);
+	printf("[GRADIENT RECOVERY] Input y (bounds)[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+	       y[0], y[1], y[2], y[3], y[4], y[5]);
+	printf("[GRADIENT RECOVERY] Input y (constraints)[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+	       y[nV], y[nV+1], y[nV+2], y[nV+3], y[nV+4], y[nV+5]);
+	#endif
+	
 	switch ( hessianType )
 	{
 		case HST_ZERO:
@@ -2993,17 +3085,42 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 			break;
 
 		default:
-			/* y'*Id */
-			for ( i=0; i<nV; ++i )
+			/* y'*Id (yB term - duals for bound constraints) */
+			for ( i=0; i<nV; ++i ) {
 				g[i] = y[i];
+			}
+			
+			#ifndef __SUPPRESSANYOUTPUT__
+			printf("[GRADIENT RECOVERY] After yB term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+			       g[0], g[1], g[2], g[3], g[4], g[5]);
+			#endif
 
 			/* - H*x */
 			H->times(1, -1.0, x, nV, 1.0, g, nV);
+			
+			#ifndef __SUPPRESSANYOUTPUT__
+			printf("[GRADIENT RECOVERY] After -H*x term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+			       g[0], g[1], g[2], g[3], g[4], g[5]);
+			#endif
 			break;
 	}
 
 	/* + A'*yC */
 	A->transTimes(1, 1.0, y + nV, nC, 1.0, g, nV);
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	printf("[GRADIENT RECOVERY] After A'*yC term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+	       g[0], g[1], g[2], g[3], g[4], g[5]);
+	printf("[GRADIENT RECOVERY] Final recovered gradient g[0:9]:\n");
+	for ( i=0; i<10; ++i ) {
+		printf("  g[%d] = %.6f\n", i, g[i]);
+	}
+	#endif
+	
+	/* ========================================
+	 * NOTE: The fix for fixed variables is now handled in solveInitialQP()
+	 * by storing g_original and restoring it after setupAuxiliaryQPgradient()
+	 * ======================================== */
 
 	#ifndef __SUPPRESSANYOUTPUT__
 	if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )

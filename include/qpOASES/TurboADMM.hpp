@@ -33,7 +33,7 @@ struct AgentData
     int nx;             /**< State dimension */
     int nu;             /**< Control dimension */
     int nV;             /**< Decision variable dimension: N*nx + (N-1)*nu */
-    int nC;             /**< Constraint dimension: (N-1)*nx (dynamics) */
+    int nC;             /**< Constraint dimension: N*nx (dynamics) - CORRECTED from (N-1)*nx */
     
     real_t* A;          /**< State transition matrix (nx × nx) */
     real_t* B;          /**< Control input matrix (nx × nu) */

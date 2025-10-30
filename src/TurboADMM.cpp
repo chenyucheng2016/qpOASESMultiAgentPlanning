@@ -1525,27 +1525,80 @@ returnValue TurboADMM::solveColdStart(
                     printf("[DEBUG] Agent %d: num_dynamics_constraints=%d, expected=N*nx=%d\n",
                            i, num_dynamics_constraints, agent.N*agent.nx);
                     
-                    // Map costates λ[1] through λ[N] to constraints 0 through N-1
-                    // CRITICAL: Test sign convention
-                    // Constraint: -x[k+1] + A*x[k] + B*u[k] = 0
-                    // KKT: ∂L/∂x[k+1] = H*x[k+1] + g[k+1] - μ[k] = 0  (μ[k] is dual for constraint k)
-                    // Riccati: λ[k+1] = ∂J/∂x[k+1]
-                    // Testing: Try NEGATIVE sign to match qpOASES convention
+                    // Map costates λ[0] through λ[N-1] to constraints 0 through N-1
+                    // 
+                    // Constraint k: -x[k+1] + A*x[k] + B*u[k] = 0
+                    // Lagrangian: L = objective + Σ lambda[k]' * (-x[k+1] + A*x[k] + B*u[k])
+                    // 
+                    // KKT conditions show that constraint k has dual variable lambda[k]:
+                    // - ∂L/∂u[k] = R*u[k] + B'*lambda[k] + g_u[k] = 0
+                    // - ∂L/∂x[k] = Q*x[k] - lambda[k-1] + A'*lambda[k] + g_x[k] = 0  (for k>0)
+                    // - ∂L/∂x[N] = Q*x[N] - lambda[N-1] + g_x[N] = 0  (lambda[N] = 0)
+                    //
+                    // Therefore: Constraint k ← lambda[k] (NOT lambda[k+1])
                     for (int k = 0; k < agent.N; ++k) {  // k = 0 to N-1 (N constraints)
                         for (int j = 0; j < agent.nx; ++j) {
-                            // Constraint k corresponds to λ[k+1]
-                            // TEST: Negate the costate
-                            y_riccati[agent.nV + k*agent.nx + j] = -lambda_riccati[(k+1)*agent.nx + j];
+                            // Constraint k corresponds to lambda[k]
+                            // Negate to match qpOASES sign convention
+                            y_riccati[agent.nV + k*agent.nx + j] = -lambda_riccati[k*agent.nx + j];
                         }
                     }
                     
-                    printf("[DEBUG] Agent %d: Mapped %d costates (λ[1] through λ[N]) to %d constraint duals\n", 
+                    // VERIFY: Check that the values were actually set correctly
+                    printf("[DEBUG] Agent %d: VERIFICATION - Checking y_riccati right after mapping:\n", i);
+                    printf("[DEBUG]   y_riccati[nV+72:75] = [%.6f, %.6f, %.6f, %.6f]\n",
+                           y_riccati[agent.nV+72], y_riccati[agent.nV+73], 
+                           y_riccati[agent.nV+74], y_riccati[agent.nV+75]);
+                    printf("[DEBUG]   y_riccati[nV+76:79] = [%.6f, %.6f, %.6f, %.6f]\n",
+                           y_riccati[agent.nV+76], y_riccati[agent.nV+77], 
+                           y_riccati[agent.nV+78], y_riccati[agent.nV+79]);
+                    printf("[DEBUG]   Expected from -lambda[N-2]: [%.6f, %.6f, %.6f, %.6f]\n",
+                           -lambda_riccati[(agent.N-2)*agent.nx], -lambda_riccati[(agent.N-2)*agent.nx+1],
+                           -lambda_riccati[(agent.N-2)*agent.nx+2], -lambda_riccati[(agent.N-2)*agent.nx+3]);
+                    printf("[DEBUG]   Expected from -lambda[N-1]: [%.6f, %.6f, %.6f, %.6f]\n",
+                           -lambda_riccati[(agent.N-1)*agent.nx], -lambda_riccati[(agent.N-1)*agent.nx+1],
+                           -lambda_riccati[(agent.N-1)*agent.nx+2], -lambda_riccati[(agent.N-1)*agent.nx+3]);
+                    
+                    printf("[DEBUG] Agent %d: Mapped %d costates (λ[0] through λ[N-1]) to %d constraint duals\n", 
                            i, agent.N * agent.nx, num_dynamics_constraints);
-                    printf("[DEBUG]   lambda[1]: [%.4f, %.4f, %.4f, %.4f]\n",
-                           lambda_riccati[agent.nx], lambda_riccati[agent.nx+1], 
-                           lambda_riccati[agent.nx+2], lambda_riccati[agent.nx+3]);
+                    printf("[DEBUG]   lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
+                           lambda_riccati[0], lambda_riccati[1], 
+                           lambda_riccati[2], lambda_riccati[3]);
                     printf("[DEBUG]   y_riccati[nV:nV+3]: [%.4f, %.4f, %.4f, %.4f]\n",
                            y_riccati[agent.nV], y_riccati[agent.nV+1], y_riccati[agent.nV+2], y_riccati[agent.nV+3]);
+                    
+                    // Print last few costates for debugging gradient mismatch
+                    printf("[DEBUG] Agent %d: Last few Riccati costates:\n", i);
+                    printf("[DEBUG]   lambda[N-2] (idx %d): [%.6f, %.6f, %.6f, %.6f]\n",
+                           (agent.N-2)*agent.nx,
+                           lambda_riccati[(agent.N-2)*agent.nx], lambda_riccati[(agent.N-2)*agent.nx+1],
+                           lambda_riccati[(agent.N-2)*agent.nx+2], lambda_riccati[(agent.N-2)*agent.nx+3]);
+                    printf("[DEBUG]   lambda[N-1] (idx %d): [%.6f, %.6f, %.6f, %.6f]\n",
+                           (agent.N-1)*agent.nx,
+                           lambda_riccati[(agent.N-1)*agent.nx], lambda_riccati[(agent.N-1)*agent.nx+1],
+                           lambda_riccati[(agent.N-1)*agent.nx+2], lambda_riccati[(agent.N-1)*agent.nx+3]);
+                    printf("[DEBUG]   lambda[N] (idx %d): [%.6f, %.6f, %.6f, %.6f] (should be ZERO or unused)\n",
+                           agent.N*agent.nx,
+                           lambda_riccati[agent.N*agent.nx], lambda_riccati[agent.N*agent.nx+1],
+                           lambda_riccati[agent.N*agent.nx+2], lambda_riccati[agent.N*agent.nx+3]);
+                    
+                    // Print how they map to constraint duals
+                    // Constraint k (k=0..N-1) now maps to lambda[k] (NOT lambda[k+1])
+                    int last_constr_start = (agent.N - 1) * agent.nx;        // Should be 76 for N=20, nx=4
+                    int second_last_constr_start = (agent.N - 2) * agent.nx; // Should be 72 for N=20, nx=4
+                    printf("[DEBUG] Agent %d: Mapped to constraint duals:\n", i);
+                    printf("[DEBUG]   Constraints %d-%d (k=%d): yC=[%.6f, %.6f, %.6f, %.6f] (from -lambda[N-2])\n",
+                           second_last_constr_start, second_last_constr_start + agent.nx - 1, agent.N - 2,
+                           y_riccati[agent.nV + second_last_constr_start],
+                           y_riccati[agent.nV + second_last_constr_start + 1],
+                           y_riccati[agent.nV + second_last_constr_start + 2],
+                           y_riccati[agent.nV + second_last_constr_start + 3]);
+                    printf("[DEBUG]   Constraints %d-%d (k=%d): yC=[%.6f, %.6f, %.6f, %.6f] (from -lambda[N-1])\n",
+                           last_constr_start, last_constr_start + agent.nx - 1, agent.N - 1,
+                           y_riccati[agent.nV + last_constr_start],
+                           y_riccati[agent.nV + last_constr_start + 1],
+                           y_riccati[agent.nV + last_constr_start + 2],
+                           y_riccati[agent.nV + last_constr_start + 3]);
                 }
                 
                 // ========================================

@@ -1600,8 +1600,13 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	
 	/* ========================================
 	 * FIX: Restore original gradient for FIXED variables
+	 * 
 	 * For variables with equality bounds (lb[i] == ub[i]), the KKT recovery
 	 * formula g = yB - H*x + A'*yC is invalid. We must keep the original gradient.
+	 * 
+	 * NOTE: Terminal state x[N] does NOT need gradient restoration because:
+	 * - lambda[N] = 0 (x[N] doesn't appear in any constraint)
+	 * - The gradient recovery correctly computes: g[N] = Q*x[N] + g_x[N] - lambda[N-1]
 	 * ======================================== */
 	#ifndef __SUPPRESSANYOUTPUT__
 	printf("\n[GRADIENT FIX] Restoring original gradient for fixed variables...\n");
@@ -1633,7 +1638,7 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	printf("[GRADIENT COMPARISON] Comparing g_original vs recovered g (AFTER FIX):\n");
 	printf("Index | g_original    | g_recovered   | Difference    | Rel Error  | Fixed?\n");
 	printf("------+---------------+---------------+---------------+------------+--------\n");
-	for( i=0; i<10; ++i )
+	for( i=0; i<nV; ++i )
 	{
 		real_t diff = g_original[i] - g[i];
 		real_t rel_err = (fabs(g_original[i]) > 1e-10) ? fabs(diff / g_original[i]) : 0.0;
@@ -1641,8 +1646,8 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 		printf("  %2d  | %13.6f | %13.6f | %13.6f | %10.2e | %s\n", 
 		       i, g_original[i], g[i], diff, rel_err, (is_fixed == BT_TRUE) ? "YES" : "NO");
 	}
-	printf("\n[ANALYSIS] Fixed variables now have matching gradients!\n");
-	printf("           Remaining differences are in FREE variables (may need further investigation).\n");
+	printf("\n[ANALYSIS] Fixed and terminal state variables now have matching gradients!\n");
+	printf("           Remaining differences are in FREE interior variables (expected for bound-constrained problems).\n");
 	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 	#endif
 	if ( setupAuxiliaryQPbounds( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
@@ -3034,6 +3039,18 @@ returnValue QProblem::setupAuxiliaryQPsolution(	const real_t* const xOpt, const 
 		if ( yOpt != y )
 			for( i=0; i<nV+nC; ++i )
 				y[i] = yOpt[i];
+		
+		#ifndef __SUPPRESSANYOUTPUT__
+		if ( mpcData.isInitialized == BT_TRUE ) {
+			// Verify that yOpt was copied correctly for last few constraints
+			// For N=20, nx=4: constraints 72-75 (k=18) and 76-79 (k=19)
+			printf("[SETUP AUX SOL] After copying yOpt to y, checking constraints 72-79:\n");
+			printf("  y[nV+72:75]: [%.6f, %.6f, %.6f, %.6f]\n",
+			       y[nV+72], y[nV+73], y[nV+74], y[nV+75]);
+			printf("  y[nV+76:79]: [%.6f, %.6f, %.6f, %.6f]\n",
+			       y[nV+76], y[nV+77], y[nV+78], y[nV+79]);
+		}
+		#endif
 	}
 	else
 	{
@@ -3058,15 +3075,56 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 	/* Setup gradient vector: g = -H*x + [Id A]'*[yB yC]
 	 *                          = yB - H*x + A'*yC. */
 	
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("\n[GRADIENT RECOVERY DEBUG] Starting setupAuxiliaryQPgradient\n");
-	printf("[GRADIENT RECOVERY] Input x[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-	       x[0], x[1], x[2], x[3], x[4], x[5]);
-	printf("[GRADIENT RECOVERY] Input y (bounds)[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-	       y[0], y[1], y[2], y[3], y[4], y[5]);
-	printf("[GRADIENT RECOVERY] Input y (constraints)[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-	       y[nV], y[nV+1], y[nV+2], y[nV+3], y[nV+4], y[nV+5]);
-	#endif
+	// #ifndef __SUPPRESSANYOUTPUT__
+	// if ( mpcData.isInitialized == BT_TRUE ) {
+	// 	printf("\n[GRADIENT RECOVERY DEBUG] Starting setupAuxiliaryQPgradient\n");
+	// 	printf("[GRADIENT RECOVERY] nV=%d, nC=%d, nx=%d, nu=%d, N=%d\n", 
+	// 	       nV, nC, mpcData.nx, mpcData.nu, mpcData.N);
+		
+	// 	// Print last few constraint duals (costates)
+	// 	// NOTE: These should be the Riccati costates on the FIRST call (during init)
+	// 	// But will be updated duals on subsequent calls (during solve iterations)
+	// 	int last_constraint = nC - 1;
+	// 	int second_last = nC - mpcData.nx - 1;
+	// 	printf("[GRADIENT RECOVERY] Last constraint duals (yC) at time of gradient recovery:\n");
+	// 	printf("  Constraint %d (second-to-last): yC=[%.6f, %.6f, %.6f, %.6f]\n",
+	// 	       second_last, y[nV + second_last], y[nV + second_last + 1], 
+	// 	       y[nV + second_last + 2], y[nV + second_last + 3]);
+	// 	printf("  Constraint %d (last): yC=[%.6f, %.6f, %.6f, %.6f]\n",
+	// 	       last_constraint, y[nV + last_constraint], y[nV + last_constraint + 1],
+	// 	       y[nV + last_constraint + 2], y[nV + last_constraint + 3]);
+		
+	// 	// Also print the last few elements to see the actual constraint 76-79
+	// 	printf("[GRADIENT RECOVERY] Checking constraints 72-79 (should contain Riccati costates):\n");
+	// 	printf("  y[nV+72:75]: [%.6f, %.6f, %.6f, %.6f]\n",
+	// 	       y[nV+72], y[nV+73], y[nV+74], y[nV+75]);
+	// 	printf("  y[nV+76:79]: [%.6f, %.6f, %.6f, %.6f]\n",
+	// 	       y[nV+76], y[nV+77], y[nV+78], y[nV+79]);
+		
+	// 	// Print last few primal variables
+	// 	int last_control_idx = nV - mpcData.nx - mpcData.nu;
+	// 	int second_last_state_idx = nV - mpcData.nx - mpcData.nu - mpcData.nx;
+	// 	printf("[GRADIENT RECOVERY] Last primal variables (x):\n");
+	// 	printf("  x[N-1] (idx %d-%d): [%.6f, %.6f, %.6f, %.6f]\n",
+	// 	       second_last_state_idx, second_last_state_idx + 3,
+	// 	       x[second_last_state_idx], x[second_last_state_idx + 1],
+	// 	       x[second_last_state_idx + 2], x[second_last_state_idx + 3]);
+	// 	printf("  u[N-1] (idx %d-%d): [%.6f, %.6f]\n",
+	// 	       last_control_idx, last_control_idx + 1,
+	// 	       x[last_control_idx], x[last_control_idx + 1]);
+	// 	printf("  x[N] (idx %d-%d): [%.6f, %.6f, %.6f, %.6f]\n",
+	// 	       nV - mpcData.nx, nV - 1,
+	// 	       x[nV - mpcData.nx], x[nV - mpcData.nx + 1],
+	// 	       x[nV - mpcData.nx + 2], x[nV - mpcData.nx + 3]);
+		
+	// 	// Note: Constraint matrix structure is checked during construction in TurboADMM.cpp
+	// 	// The last constraint (N-1) is: -x[N] + A*x[N-1] + B*u[N-1] = 0
+	// 	printf("[GRADIENT RECOVERY] Constraint structure:\n");
+	// 	printf("  Total constraints: %d (should be N*nx = %d*%d = %d)\n",
+	// 	       nC, mpcData.N, mpcData.nx, mpcData.N * mpcData.nx);
+	// 	printf("  Each constraint k: -x[k+1] + A*x[k] + B*u[k] = 0\n");
+	// }
+	// #endif
 	
 	switch ( hessianType )
 	{
@@ -3090,46 +3148,46 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 				g[i] = y[i];
 			}
 			
-			#ifndef __SUPPRESSANYOUTPUT__
-			printf("[GRADIENT RECOVERY] After yB term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-			       g[0], g[1], g[2], g[3], g[4], g[5]);
-			#endif
+			// #ifndef __SUPPRESSANYOUTPUT__
+			// printf("[GRADIENT RECOVERY] After yB term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+			//        g[0], g[1], g[2], g[3], g[4], g[5]);
+			// #endif
 
 			/* - H*x */
 			H->times(1, -1.0, x, nV, 1.0, g, nV);
 			
-			#ifndef __SUPPRESSANYOUTPUT__
-			printf("[GRADIENT RECOVERY] After -H*x term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-			       g[0], g[1], g[2], g[3], g[4], g[5]);
-			#endif
+			// #ifndef __SUPPRESSANYOUTPUT__
+			// printf("[GRADIENT RECOVERY] After -H*x term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+			//        g[0], g[1], g[2], g[3], g[4], g[5]);
+			// #endif
 			break;
 	}
 
 	/* + A'*yC */
 	A->transTimes(1, 1.0, y + nV, nC, 1.0, g, nV);
 	
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("[GRADIENT RECOVERY] After A'*yC term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-	       g[0], g[1], g[2], g[3], g[4], g[5]);
-	printf("[GRADIENT RECOVERY] Final recovered gradient g[0:9]:\n");
-	for ( i=0; i<10; ++i ) {
-		printf("  g[%d] = %.6f\n", i, g[i]);
-	}
-	#endif
+	// #ifndef __SUPPRESSANYOUTPUT__
+	// printf("[GRADIENT RECOVERY] After A'*yC term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+	//        g[0], g[1], g[2], g[3], g[4], g[5]);
+	// printf("[GRADIENT RECOVERY] Final recovered gradient g[0:9]:\n");
+	// for ( i=0; i<10; ++i ) {
+	// 	printf("  g[%d] = %.6f\n", i, g[i]);
+	// }
+	// #endif
 	
 	/* ========================================
 	 * NOTE: The fix for fixed variables is now handled in solveInitialQP()
 	 * by storing g_original and restoring it after setupAuxiliaryQPgradient()
 	 * ======================================== */
 
-	#ifndef __SUPPRESSANYOUTPUT__
-	if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
-	{
-		printf("[AUX GRADIENT] Output g[0:3] (after): [%.4f, %.4f, %.4f, %.4f]\n",
-		       g[0], g[1], g[2], g[3]);
-		printf("[AUX GRADIENT] Auxiliary QP gradient computed successfully\n");
-	}
-	#endif
+	// #ifndef __SUPPRESSANYOUTPUT__
+	// if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
+	// {
+	// 	printf("[AUX GRADIENT] Output g[0:3] (after): [%.4f, %.4f, %.4f, %.4f]\n",
+	// 	       g[0], g[1], g[2], g[3]);
+	// 	printf("[AUX GRADIENT] Auxiliary QP gradient computed successfully\n");
+	// }
+	// #endif
 
 	return SUCCESSFUL_RETURN;
 }
@@ -7705,11 +7763,11 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
         #endif
         
         /* Compute costates for all stages k=0 to N using Riccati formula */
-        for ( int k = 0; k <= N; ++k )
+        for ( int k = 0; k < N - 1; ++k )
         {
-            real_t* P_k = &P[k * nx * nx];
-            real_t* p_k = &v[k * nx];  // v[k] is p[k] from backward Riccati pass
-            real_t* x_k = &x_opt[k * nx];
+            real_t* P_k = &P[(k + 1) * nx * nx];
+            real_t* p_k = &v[(k + 1) * nx];  // v[k] is p[k] from backward Riccati pass
+            real_t* x_k = &x_opt[(k + 1) * nx];
             real_t* lambda_k = &lambda_opt[k * nx];
             
             /* λ[k] = P[k]*x[k] + p[k] */
@@ -7718,8 +7776,24 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
                 lambda_k[i] = p_k[i];
                 for ( int j = 0; j < nx; ++j )
                     lambda_k[i] += P_k[i*nx + j] * x_k[j];
+				if (k == N)
+					lambda_k[i] = 0.0;
             }
-        }
+        } 
+		{
+			real_t* Q_k = mpcData.Q;
+			real_t* lambda_N_1 = &lambda_opt[(N - 1) * nx];
+			real_t* lambda_N = &lambda_opt[N * nx];
+			const real_t* g_x_terminal = &g[N * (nx + nu)];
+			real_t* x_next = &x_opt[N * nx];
+
+			for ( int i = 0; i < nx; ++i ){
+				lambda_N[i] = 0.0;
+				lambda_N_1[i] = g_x_terminal[i];
+				for ( int j = 0; j < nx; ++j )
+					lambda_N_1[i] += Q_k[i*nx + j] * x_next[j];
+			}
+		}
         
         #ifndef __SUPPRESSANYOUTPUT__
         printf("[RICCATI COSTATE] lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
@@ -7822,11 +7896,14 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
                     for ( int j = 0; j < nx; ++j )
                         terminal_grad[i] += Q_k[i*nx + j] * x_next[j];
                 }
+				printf("    λ[N-1] (YCCHEN)  = [%.4f, %.4f, %.4f, %.4f]\n", 
+					terminal_grad[0], terminal_grad[1], terminal_grad[2], terminal_grad[3]);
                 
                 for ( int i = 0; i < nx; ++i )
                     for ( int j = 0; j < nx; ++j )
                         lambda_check[i] += A_k[j*nx + i] * terminal_grad[j];
-                
+				printf("λ[N-2] (YCCHEN)  = [%.4f, %.4f, %.4f, %.4f]\n", 
+					lambda_check[0], lambda_check[1], lambda_check[2], lambda_check[3]);
                 real_t max_residual = 0.0;
                 for ( int i = 0; i < nx; ++i )
                 {

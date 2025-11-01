@@ -4,7 +4,7 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -O2 -Wall -std=c++11
+CXXFLAGS = -g -O2 -Wall -std=c++11 -fno-omit-frame-pointer
 INCLUDES = -I../include -I.
 LDFLAGS = -L../bin -lqpOASES -lm
 
@@ -13,7 +13,7 @@ BINDIR = bin
 UTILDIR = utils
 
 # Targets
-TESTS = test_riccati_mpc test_realworld_mpc benchmark_comparison benchmark_horizon_sweep diagnostic_warmstart debug_mpc_path
+TESTS = test_riccati_mpc test_realworld_mpc benchmark_comparison benchmark_horizon_sweep diagnostic_warmstart debug_mpc_path test_2agent_rho25
 
 # Default target
 all: $(BINDIR) $(TESTS)
@@ -51,6 +51,23 @@ diagnostic_warmstart: $(BINDIR) diagnostic_warmstart.cpp $(UTILDIR)/test_problem
 debug_mpc_path: $(BINDIR) debug_mpc_path.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ debug_mpc_path.cpp $(LDFLAGS)
 	@echo "Built: $(BINDIR)/$@"
+
+# Build 2-agent ADMM test with rho=25 (requires TurboADMM and all qpOASES sources)
+SRCDIR = ../src
+SOURCES = $(SRCDIR)/TurboADMM.cpp $(SRCDIR)/QProblem.cpp $(SRCDIR)/QProblemB.cpp \
+          $(SRCDIR)/Bounds.cpp $(SRCDIR)/Constraints.cpp $(SRCDIR)/SubjectTo.cpp \
+          $(SRCDIR)/Indexlist.cpp $(SRCDIR)/Utils.cpp $(SRCDIR)/Options.cpp \
+          $(SRCDIR)/Matrices.cpp $(SRCDIR)/MessageHandling.cpp \
+          $(SRCDIR)/Flipper.cpp $(SRCDIR)/BLASReplacement.cpp $(SRCDIR)/LAPACKReplacement.cpp
+
+test_2agent_rho25: $(BINDIR) test_2agent_rho25.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ test_2agent_rho25.cpp $(SOURCES) -lm
+	@echo "Built: $(BINDIR)/$@"
+
+# # Build 2-agent ADMM test with OSQP solver (requires Eigen)
+# test_2agent_rho25_osqp: $(BINDIR) test_2agent_rho25_osqp.cpp
+# 	$(CXX) $(CXXFLAGS) $(INCLUDES) -I/usr/include/eigen3 -I/usr/local/include/eigen3 -I/usr/local/include/osqp -o $(BINDIR)/$@ test_2agent_rho25_osqp.cpp $(SOURCES) -L/usr/local/lib -losqp -lm
+# 	@echo "Built: $(BINDIR)/$@"
 
 # Run all tests
 test: all

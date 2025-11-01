@@ -1498,13 +1498,14 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 			return THROWERROR( RET_INIT_FAILED_REGULARISATION );
 	}
 
+	/* d) TQ factorisation. */
+	if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
+		return THROWERROR( RET_INIT_FAILED_TQ );
+
 	/* c) Working set of auxiliary QP. */
 	if ( setupAuxiliaryWorkingSet( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
 		return THROWERROR( RET_INIT_FAILED );
 
-	/* d) TQ factorisation. */
-	if ( setupTQfactorisation( ) != SUCCESSFUL_RETURN )
-		return THROWERROR( RET_INIT_FAILED_TQ );
 
 	/* d) Copy external Cholesky factor if provided */
 	haveCholesky = BT_FALSE;
@@ -2777,6 +2778,17 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 	int_t nC = getNC( );
 	BooleanType WSisTrivial = BT_TRUE;
 
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( mpcData.isInitialized == BT_TRUE ) {
+		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+		printf("[SETUP AUX WS] Starting setupAuxiliaryWorkingSet\n");
+		printf("[SETUP AUX WS] nV=%d, nC=%d, setupAfresh=%s\n", 
+		       nV, nC, (setupAfresh == BT_TRUE) ? "TRUE" : "FALSE");
+		printf("[SETUP AUX WS] MPC structure: N=%d, nx=%d, nu=%d\n",
+		       mpcData.N, mpcData.nx, mpcData.nu);
+	}
+	#endif
+
 	/* consistency checks */
 	if ( auxiliaryBounds != 0 )
 	{
@@ -2799,6 +2811,69 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 	{
 		return THROWERROR( RET_INVALID_ARGUMENTS );
 	}
+	
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( mpcData.isInitialized == BT_TRUE ) {
+		// Count constraint types
+		int num_equality = 0;
+		int num_inactive = 0;
+		int num_lower = 0;
+		int num_upper = 0;
+		
+		for( i=0; i<nC; ++i ) {
+			SubjectToType type = constraints.getType(i);
+			SubjectToStatus status = auxiliaryConstraints->getStatus(i);
+			
+			if (type == ST_EQUALITY) num_equality++;
+			if (status == ST_INACTIVE) num_inactive++;
+			if (status == ST_LOWER) num_lower++;
+			if (status == ST_UPPER) num_upper++;
+		}
+		
+		printf("[SETUP AUX WS] Constraint summary:\n");
+		printf("  Total constraints: %d\n", nC);
+		printf("  Equality type: %d\n", num_equality);
+		printf("  Auxiliary status - Inactive: %d, Lower: %d, Upper: %d\n",
+		       num_inactive, num_lower, num_upper);
+		
+		// Print first few and last few constraints
+		printf("[SETUP AUX WS] First 4 constraints:\n");
+		for( i=0; i<4 && i<nC; ++i ) {
+			SubjectToStatus curr_st = constraints.getStatus(i);
+			SubjectToStatus aux_st = auxiliaryConstraints->getStatus(i);
+			const char* curr_str = (curr_st == ST_INACTIVE) ? "INACTIVE" : 
+			                       (curr_st == ST_LOWER) ? "LOWER" :
+			                       (curr_st == ST_UPPER) ? "UPPER" : 
+			                       (curr_st == ST_UNDEFINED) ? "UNDEFINED" : "INFEASIBLE";
+			const char* aux_str = (aux_st == ST_INACTIVE) ? "INACTIVE" : 
+			                      (aux_st == ST_LOWER) ? "LOWER" :
+			                      (aux_st == ST_UPPER) ? "UPPER" : 
+			                      (aux_st == ST_UNDEFINED) ? "UNDEFINED" : "INFEASIBLE";
+			printf("  C[%d]: type=%s, current_status=%s, aux_status=%s\n",
+			       i,
+			       (constraints.getType(i) == ST_EQUALITY) ? "EQUALITY" : "BOUNDED",
+			       curr_str, aux_str);
+		}
+		
+		printf("[SETUP AUX WS] Last 4 constraints:\n");
+		for( i=nC-4; i<nC && i>=0; ++i ) {
+			SubjectToStatus curr_st = constraints.getStatus(i);
+			SubjectToStatus aux_st = auxiliaryConstraints->getStatus(i);
+			const char* curr_str = (curr_st == ST_INACTIVE) ? "INACTIVE" : 
+			                       (curr_st == ST_LOWER) ? "LOWER" :
+			                       (curr_st == ST_UPPER) ? "UPPER" : 
+			                       (curr_st == ST_UNDEFINED) ? "UNDEFINED" : "INFEASIBLE";
+			const char* aux_str = (aux_st == ST_INACTIVE) ? "INACTIVE" : 
+			                      (aux_st == ST_LOWER) ? "LOWER" :
+			                      (aux_st == ST_UPPER) ? "UPPER" : 
+			                      (aux_st == ST_UNDEFINED) ? "UNDEFINED" : "INFEASIBLE";
+			printf("  C[%d]: type=%s, current_status=%s, aux_status=%s\n",
+			       i,
+			       (constraints.getType(i) == ST_EQUALITY) ? "EQUALITY" : "BOUNDED",
+			       curr_str, aux_str);
+		}
+	}
+	#endif
 
 	/* Check for trivial working set (all and only bounds active) */
 	for (i = 0; i < nV; i++)
@@ -2898,6 +2973,21 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 	int nAddedConstraints = 0;
 	int nFailedLICheck = 0;
 	
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( mpcData.isInitialized == BT_TRUE ) {
+		printf("\n[SETUP AUX WS] Starting equality constraint activation loop...\n");
+		printf("[SETUP AUX WS] Current nAC (before adding equalities): %d\n", getNAC());
+		
+		// Count how many equality constraints are currently inactive
+		int num_inactive_eq = 0;
+		for( i=0; i<nC; ++i ) {
+			if ( constraints.getType(i) == ST_EQUALITY && constraints.getStatus(i) == ST_INACTIVE )
+				num_inactive_eq++;
+		}
+		printf("[SETUP AUX WS] Number of INACTIVE equality constraints to add: %d\n", num_inactive_eq);
+	}
+	#endif
+	
 	for( i=0; i<nC; ++i )
 	{
         //if ( ( constraints.getType( i ) == ST_EQUALITY ) && ( ( constraints.getStatus( i ) == ST_INACTIVE ) && ( auxiliaryConstraints->getStatus( i ) != ST_INACTIVE ) ) )
@@ -2908,18 +2998,63 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 		{
 			nEqualityConstraints++;
 			
-			/* Add constraint only if it is linearly independent from the current working set. */
-			if ( addConstraint_checkLI( i ) == RET_LINEARLY_INDEPENDENT )
+			#ifndef __SUPPRESSANYOUTPUT__
+			if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
+				printf("[SETUP AUX WS] Processing equality constraint C[%d]...\n", i);
+			}
+			#endif
+			
+			/* For MPC dynamics constraints during auxiliary QP setup, skip LI check
+			 * and call addConstraint() directly.
+			 * MPC dynamics constraints are structurally guaranteed to be linearly independent. */
+			BooleanType skipLICheck = BT_FALSE;
+			// DISABLED: Let standard qpOASES LI test run
+			// if ( mpcData.isInitialized == BT_TRUE && setupAfresh == BT_TRUE ) {
+			// 	// Skip LI check for MPC dynamics constraints in auxiliary QP
+			// 	skipLICheck = BT_TRUE;
+			// 	nSkippedLICheck++;
+			// }
+			
+			if ( skipLICheck == BT_TRUE )
 			{
-				if ( addConstraint( i,ST_LOWER,updateCholesky ) != SUCCESSFUL_RETURN )
+				/* Call addConstraint() directly, bypassing LI check completely */
+				if ( addConstraint( i, ST_LOWER, updateCholesky ) != SUCCESSFUL_RETURN )
 					return THROWERROR( RET_SETUP_WORKINGSET_FAILED );
 				nAddedConstraints++;
+				
+				#ifndef __SUPPRESSANYOUTPUT__
+				if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
+					printf("[SETUP AUX WS]   ✓ C[%d] added successfully (LI check SKIPPED for MPC)\n", i);
+				}
+				#endif
 			}
 			else
 			{
-				/* Equalities are not linearly independent! */
-				constraints.setType(i, ST_BOUNDED);
-				nFailedLICheck++;
+				/* Add constraint only if it is linearly independent from the current working set. */
+				if ( addConstraint_checkLI( i ) == RET_LINEARLY_INDEPENDENT )
+				{
+					if ( addConstraint( i,ST_LOWER,updateCholesky ) != SUCCESSFUL_RETURN )
+						return THROWERROR( RET_SETUP_WORKINGSET_FAILED );
+					nAddedConstraints++;
+					
+					#ifndef __SUPPRESSANYOUTPUT__
+					if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
+						printf("[SETUP AUX WS]   ✓ C[%d] added successfully (LI check passed)\n", i);
+					}
+					#endif
+				}
+				else
+				{
+					/* Equalities are not linearly independent! */
+					constraints.setType(i, ST_BOUNDED);
+					nFailedLICheck++;
+					
+					#ifndef __SUPPRESSANYOUTPUT__
+					if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
+						printf("[SETUP AUX WS]   ✗ C[%d] FAILED LI check - converted to BOUNDED\n", i);
+					}
+					#endif
+				}
 			}
 		}
 	}
@@ -2974,6 +3109,76 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 
 	options.enableFullLITests = was_fulli;
 	options.epsLITests = backupEpsLITests;
+
+	#ifndef __SUPPRESSANYOUTPUT__
+	if ( mpcData.isInitialized == BT_TRUE ) {
+		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+		printf("[AUX WS COMPLETE] Auxiliary working set setup complete\n");
+		printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+		
+		// Check dimensions
+		printf("[AUX WS STATE] Problem dimensions:\n");
+		printf("  nV=%d, nC=%d, nFR=%d, nFX=%d, nAC=%d, nIAC=%d\n",
+		       nV, nC, getNFR(), getNFX(), getNAC(), getNIAC());
+		printf("  nZ=%d (null space dimension)\n", getNZ());
+		
+		// Check Q matrix (null space basis)
+		if ( Q != 0 ) {
+			printf("[AUX WS STATE] Q matrix: ALLOCATED (size=%d)\n", sizeT);
+			printf("  Q[0,0] = %.6e\n", Q[0]);
+			printf("  Q[1,1] = %.6e\n", (sizeT > 1) ? Q[sizeT+1] : 0.0);
+		} else {
+			printf("[AUX WS STATE] Q matrix: NULL (NOT ALLOCATED!)\n");
+		}
+		
+		// Check T matrix (Cholesky factor)
+		if ( T != 0 ) {
+			printf("[AUX WS STATE] T matrix: ALLOCATED (size=%d)\n", sizeT);
+			printf("  T[0,0] = %.6e\n", T[0]);
+			printf("  T[1,1] = %.6e\n", (sizeT > 1) ? T[sizeT+1] : 0.0);
+		} else {
+			printf("[AUX WS STATE] T matrix: NULL (NOT ALLOCATED!)\n");
+		}
+		
+		// Check R matrix (constraint matrix factorization)
+		real_t* R_ptr = 0;
+		int_t dimR = 0;
+		if ( constraints.getActive()->getLength() > 0 ) {
+			// R matrix should exist if there are active constraints
+			printf("[AUX WS STATE] Active constraints: %d\n", constraints.getActive()->getLength());
+			printf("[AUX WS STATE] R matrix: Expected to exist for active constraints\n");
+		} else {
+			printf("[AUX WS STATE] Active constraints: 0 (no R matrix needed)\n");
+		}
+		
+		// Check bounds status
+		int nBounds_lower = 0, nBounds_upper = 0, nBounds_fixed = 0, nBounds_free = 0;
+		for ( int i = 0; i < nV; ++i ) {
+			SubjectToStatus st = bounds.getStatus(i);
+			if (st == ST_LOWER) nBounds_lower++;
+			else if (st == ST_UPPER) nBounds_upper++;
+			else if (bounds.getType(i) == ST_EQUALITY) nBounds_fixed++;
+			else if (st == ST_INACTIVE) nBounds_free++;
+		}
+		printf("[AUX WS STATE] Bounds status:\n");
+		printf("  Fixed: %d, Lower: %d, Upper: %d, Free: %d\n",
+		       nBounds_fixed, nBounds_lower, nBounds_upper, nBounds_free);
+		
+		// Check constraints status
+		int nConstr_lower = 0, nConstr_upper = 0, nConstr_inactive = 0;
+		for ( int i = 0; i < nC; ++i ) {
+			SubjectToStatus st = constraints.getStatus(i);
+			if (st == ST_LOWER) nConstr_lower++;
+			else if (st == ST_UPPER) nConstr_upper++;
+			else if (st == ST_INACTIVE) nConstr_inactive++;
+		}
+		printf("[AUX WS STATE] Constraints status:\n");
+		printf("  Lower: %d, Upper: %d, Inactive: %d\n",
+		       nConstr_lower, nConstr_upper, nConstr_inactive);
+		
+		printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+	}
+	#endif
 
 	return SUCCESSFUL_RETURN;
 }
@@ -3639,6 +3844,17 @@ returnValue QProblem::addConstraint_checkLI( int_t number )
 		for (i = 0; i < nFR; i++)
 			l2  += Arow[i]*Arow[i];
 
+		#ifndef __SUPPRESSANYOUTPUT__
+		if ( mpcData.isInitialized == BT_TRUE && (number < 4 || number >= nC-4) ) {
+			printf("[LI TEST] Constraint C[%d]: nFR=%d, nZ=%d, nAC=%d, l2=%.6e, epsLITests=%.6e\n",
+			       number, nFR, nZ, nAC, l2, options.epsLITests);
+			if (nFR > 0) {
+				printf("[LI TEST]   Arow[0:3] = [%.6e, %.6e, %.6e, %.6e]\n",
+				       Arow[0], (nFR>1)?Arow[1]:0.0, (nFR>2)?Arow[2]:0.0, (nFR>3)?Arow[3]:0.0);
+			}
+		}
+		#endif
+
 		for( j=0; j<nZ; ++j )
 		{
 			sum = 0.0;
@@ -3650,11 +3866,25 @@ returnValue QProblem::addConstraint_checkLI( int_t number )
 
 			if ( getAbs( sum ) > options.epsLITests*l2 )
 			{
-				/*fprintf(stdFile, "LI test: |sum| = %9.2e, l2 = %9.2e, var = %d\n", getAbs(sum), l2, jj+1); */
+				#ifndef __SUPPRESSANYOUTPUT__
+				if ( mpcData.isInitialized == BT_TRUE && (number < 4 || number >= nC-4) ) {
+					printf("[LI TEST]   ✓ PASSED at j=%d: |sum|=%.6e > threshold=%.6e\n",
+					       j, getAbs(sum), options.epsLITests*l2);
+				}
+				#endif
 				returnvalue = RET_LINEARLY_INDEPENDENT;
 				break;
 			}
 		}
+
+		#ifndef __SUPPRESSANYOUTPUT__
+		if ( mpcData.isInitialized == BT_TRUE && (number < 4 || number >= nC-4) ) {
+			if (returnvalue != RET_LINEARLY_INDEPENDENT) {
+				printf("[LI TEST]   ✗ FAILED: All |sum| <= threshold=%.6e (checked %d null space vectors)\n",
+				       options.epsLITests*l2, nZ);
+			}
+		}
+		#endif
 
 		delete[] Arow;
 	}
@@ -7103,11 +7333,12 @@ returnValue QProblem::allocateMPCMemory()
 	int_t nV = getNV();
 
 	/* Allocate Riccati solution arrays */
+	/* CRITICAL: P needs (N+1) stages [0..N], K needs N stages [0..N-1] */
 	if ( P == 0 )
-		P = new real_t[N * nx * nx];
+		P = new real_t[(N+1) * nx * nx];
 
 	if ( K == 0 )
-		K = new real_t[(N-1) * nu * nx];
+		K = new real_t[N * nu * nx];
 
 	/* Allocate temporary matrices for Riccati recursion */
 	if ( riccatiTemp1 == 0 )

@@ -13,7 +13,7 @@ BINDIR = bin
 UTILDIR = utils
 
 # Targets
-TESTS = test_riccati_mpc test_realworld_mpc benchmark_comparison benchmark_horizon_sweep diagnostic_warmstart debug_mpc_path test_2agent_rho25
+TESTS = test_riccati_mpc test_realworld_mpc benchmark_comparison benchmark_horizon_sweep diagnostic_warmstart debug_mpc_path test_2agent_rho25 test_2agent_rho25_osqp test_6agent
 
 # Default target
 all: $(BINDIR) $(TESTS)
@@ -64,10 +64,18 @@ test_2agent_rho25: $(BINDIR) test_2agent_rho25.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ test_2agent_rho25.cpp $(SOURCES) -lm
 	@echo "Built: $(BINDIR)/$@"
 
-# # Build 2-agent ADMM test with OSQP solver (requires Eigen)
-# test_2agent_rho25_osqp: $(BINDIR) test_2agent_rho25_osqp.cpp
-# 	$(CXX) $(CXXFLAGS) $(INCLUDES) -I/usr/include/eigen3 -I/usr/local/include/eigen3 -I/usr/local/include/osqp -o $(BINDIR)/$@ test_2agent_rho25_osqp.cpp $(SOURCES) -L/usr/local/lib -losqp -lm
-# 	@echo "Built: $(BINDIR)/$@"
+test_4agent_rho25: $(BINDIR) test_4agent_rho25.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ test_4agent_rho25.cpp $(SOURCES) -lm
+	@echo "Built: $(BINDIR)/$@"
+
+test_6agent: $(BINDIR) test_6agent.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ test_6agent.cpp $(SOURCES) -lm
+	@echo "Built: $(BINDIR)/$@"
+
+# Build 2-agent ADMM test with OSQP solver (requires Eigen)
+test_2agent_rho25_osqp: $(BINDIR) test_2agent_rho25_osqp.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -I"C:/osqp/include" -I"C:/eigen" -o $(BINDIR)/$@ test_2agent_rho25_osqp.cpp $(SOURCES) -D__NO_COPYRIGHT__ -L"C:/osqp/lib" -losqp -lm
+	@echo "Built: $(BINDIR)/$@"
 
 # Run all tests
 test: all

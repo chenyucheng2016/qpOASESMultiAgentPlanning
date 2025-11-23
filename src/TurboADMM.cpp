@@ -1601,24 +1601,6 @@ returnValue TurboADMM::solveColdStart(
                            y_riccati[agent.nV + last_constr_start + 3]);
                 }
                 
-                // ========================================
-                // Call init() with Riccati warm start
-                // ========================================
-                // NOTE: init() will call setupAuxiliaryWorkingSet() then setupMPCTQfactorisation()
-                // This ensures the TQ factorization is computed with the correct active constraints
-                
-                // ========================================
-                // VERIFICATION: Log original gradient before init()
-                // ========================================
-                // printf("\n================================================================================\n");
-                // printf("[GRADIENT VERIFICATION] Agent %d - Original Gradient\n", i);
-                // printf("================================================================================\n");
-                // printf("Original Riccati Gradient (input to init):\n");
-                // for (int j = 0; j < agent.nV; ++j) {
-                //     printf("  g[%3d] = %12.6f\n", j, g[j]);
-                // }
-                // printf("--------------------------------------------------------------------------------\n");
-                
                 ret = agent_solvers_[i]->init(
                     H, g, A_constraint,
                     lb_local, ub_local,  // Use local bounds with fixed x0

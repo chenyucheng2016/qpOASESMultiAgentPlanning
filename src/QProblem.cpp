@@ -1506,7 +1506,6 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	if ( setupAuxiliaryWorkingSet( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
 		return THROWERROR( RET_INIT_FAILED );
 
-
 	/* d) Copy external Cholesky factor if provided */
 	haveCholesky = BT_FALSE;
 
@@ -1557,47 +1556,12 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 		ubA_original[i] = ubA[i];
 	}
 
-	/* ... and setup QP data of an auxiliary QP having an optimal solution
-	 * as specified by the user (or xOpt = yOpt = 0, by default). */
-	
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-	printf("[GRADIENT COMPARISON] Original gradient g_original[0:9] (passed to qpOASES):\n");
-	for( i=0; i<10; ++i )
-	{
-		printf("  g_original[%d] = %.6f\n", i, g_original[i]);
-	}
-	printf("\n[BOUND STATUS] Checking which variables have equality bounds (lb == ub):\n");
-	for( i=0; i<10; ++i )
-	{
-		BooleanType is_fixed = (fabs(lb_original[i] - ub_original[i]) < 1e-10) ? BT_TRUE : BT_FALSE;
-		printf("  Var[%d]: lb=%.6f, ub=%.6f, fixed=%s\n", 
-		       i, lb_original[i], ub_original[i], (is_fixed == BT_TRUE) ? "YES" : "NO");
-	}
-	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-	#endif
 	
 	if ( setupAuxiliaryQPgradient( ) != SUCCESSFUL_RETURN )
 	{
 		delete[] ubA_original; delete[] lbA_original; delete[] ub_original; delete[] lb_original; delete[] g_original;
 		return THROWERROR( RET_INIT_FAILED );
 	}
-	
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-	printf("[GRADIENT COMPARISON] Comparing g_original vs recovered g (BEFORE FIX):\n");
-	printf("Index | g_original    | g_recovered   | Difference    | Rel Error  | Fixed?\n");
-	printf("------+---------------+---------------+---------------+------------+--------\n");
-	for( i=0; i<10; ++i )
-	{
-		real_t diff = g_original[i] - g[i];
-		real_t rel_err = (fabs(g_original[i]) > 1e-10) ? fabs(diff / g_original[i]) : 0.0;
-		BooleanType is_fixed = (fabs(lb_original[i] - ub_original[i]) < 1e-10) ? BT_TRUE : BT_FALSE;
-		printf("  %2d  | %13.6f | %13.6f | %13.6f | %10.2e | %s\n", 
-		       i, g_original[i], g[i], diff, rel_err, (is_fixed == BT_TRUE) ? "YES" : "NO");
-	}
-	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-	#endif
 	
 	/* ========================================
 	 * FIX: Restore original gradient for FIXED variables
@@ -1609,48 +1573,16 @@ returnValue QProblem::solveInitialQP(	const real_t* const xOpt, const real_t* co
 	 * - lambda[N] = 0 (x[N] doesn't appear in any constraint)
 	 * - The gradient recovery correctly computes: g[N] = Q*x[N] + g_x[N] - lambda[N-1]
 	 * ======================================== */
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("\n[GRADIENT FIX] Restoring original gradient for fixed variables...\n");
-	int num_fixed = 0;
-	#endif
-	
+
 	for( i=0; i<nV; ++i )
 	{
 		// Check if variable is fixed by equality bounds
 		if ( fabs(lb_original[i] - ub_original[i]) < 1e-10 )
-		{
-			#ifndef __SUPPRESSANYOUTPUT__
-			if ( i < 10 ) {
-				printf("  Var[%d]: FIXED (lb=%.6f, ub=%.6f), restoring g[%d]: %.6f -> %.6f\n",
-				       i, lb_original[i], ub_original[i], i, g[i], g_original[i]);
-			}
-			num_fixed++;
-			#endif
-			
-			// Restore original gradient for fixed variable
+		{	// Restore original gradient for fixed variable
 			g[i] = g_original[i];
 		}
 	}
 	
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("[GRADIENT FIX] Restored gradient for %d fixed variables\n\n", num_fixed);
-	
-	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-	printf("[GRADIENT COMPARISON] Comparing g_original vs recovered g (AFTER FIX):\n");
-	printf("Index | g_original    | g_recovered   | Difference    | Rel Error  | Fixed?\n");
-	printf("------+---------------+---------------+---------------+------------+--------\n");
-	for( i=0; i<nV; ++i )
-	{
-		real_t diff = g_original[i] - g[i];
-		real_t rel_err = (fabs(g_original[i]) > 1e-10) ? fabs(diff / g_original[i]) : 0.0;
-		BooleanType is_fixed = (fabs(lb_original[i] - ub_original[i]) < 1e-10) ? BT_TRUE : BT_FALSE;
-		printf("  %2d  | %13.6f | %13.6f | %13.6f | %10.2e | %s\n", 
-		       i, g_original[i], g[i], diff, rel_err, (is_fixed == BT_TRUE) ? "YES" : "NO");
-	}
-	printf("\n[ANALYSIS] Fixed and terminal state variables now have matching gradients!\n");
-	printf("           Remaining differences are in FREE interior variables (expected for bound-constrained problems).\n");
-	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-	#endif
 	if ( setupAuxiliaryQPbounds( &auxiliaryBounds,&auxiliaryConstraints,BT_TRUE ) != SUCCESSFUL_RETURN )
 	{
 		delete[] ubA_original; delete[] lbA_original; delete[] ub_original; delete[] lb_original; delete[] g_original;
@@ -3276,61 +3208,6 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 	int_t nV = getNV( );
 	int_t nC = getNC( );
 
-
-	/* Setup gradient vector: g = -H*x + [Id A]'*[yB yC]
-	 *                          = yB - H*x + A'*yC. */
-	
-	// #ifndef __SUPPRESSANYOUTPUT__
-	// if ( mpcData.isInitialized == BT_TRUE ) {
-	// 	printf("\n[GRADIENT RECOVERY DEBUG] Starting setupAuxiliaryQPgradient\n");
-	// 	printf("[GRADIENT RECOVERY] nV=%d, nC=%d, nx=%d, nu=%d, N=%d\n", 
-	// 	       nV, nC, mpcData.nx, mpcData.nu, mpcData.N);
-		
-	// 	// Print last few constraint duals (costates)
-	// 	// NOTE: These should be the Riccati costates on the FIRST call (during init)
-	// 	// But will be updated duals on subsequent calls (during solve iterations)
-	// 	int last_constraint = nC - 1;
-	// 	int second_last = nC - mpcData.nx - 1;
-	// 	printf("[GRADIENT RECOVERY] Last constraint duals (yC) at time of gradient recovery:\n");
-	// 	printf("  Constraint %d (second-to-last): yC=[%.6f, %.6f, %.6f, %.6f]\n",
-	// 	       second_last, y[nV + second_last], y[nV + second_last + 1], 
-	// 	       y[nV + second_last + 2], y[nV + second_last + 3]);
-	// 	printf("  Constraint %d (last): yC=[%.6f, %.6f, %.6f, %.6f]\n",
-	// 	       last_constraint, y[nV + last_constraint], y[nV + last_constraint + 1],
-	// 	       y[nV + last_constraint + 2], y[nV + last_constraint + 3]);
-		
-	// 	// Also print the last few elements to see the actual constraint 76-79
-	// 	printf("[GRADIENT RECOVERY] Checking constraints 72-79 (should contain Riccati costates):\n");
-	// 	printf("  y[nV+72:75]: [%.6f, %.6f, %.6f, %.6f]\n",
-	// 	       y[nV+72], y[nV+73], y[nV+74], y[nV+75]);
-	// 	printf("  y[nV+76:79]: [%.6f, %.6f, %.6f, %.6f]\n",
-	// 	       y[nV+76], y[nV+77], y[nV+78], y[nV+79]);
-		
-	// 	// Print last few primal variables
-	// 	int last_control_idx = nV - mpcData.nx - mpcData.nu;
-	// 	int second_last_state_idx = nV - mpcData.nx - mpcData.nu - mpcData.nx;
-	// 	printf("[GRADIENT RECOVERY] Last primal variables (x):\n");
-	// 	printf("  x[N-1] (idx %d-%d): [%.6f, %.6f, %.6f, %.6f]\n",
-	// 	       second_last_state_idx, second_last_state_idx + 3,
-	// 	       x[second_last_state_idx], x[second_last_state_idx + 1],
-	// 	       x[second_last_state_idx + 2], x[second_last_state_idx + 3]);
-	// 	printf("  u[N-1] (idx %d-%d): [%.6f, %.6f]\n",
-	// 	       last_control_idx, last_control_idx + 1,
-	// 	       x[last_control_idx], x[last_control_idx + 1]);
-	// 	printf("  x[N] (idx %d-%d): [%.6f, %.6f, %.6f, %.6f]\n",
-	// 	       nV - mpcData.nx, nV - 1,
-	// 	       x[nV - mpcData.nx], x[nV - mpcData.nx + 1],
-	// 	       x[nV - mpcData.nx + 2], x[nV - mpcData.nx + 3]);
-		
-	// 	// Note: Constraint matrix structure is checked during construction in TurboADMM.cpp
-	// 	// The last constraint (N-1) is: -x[N] + A*x[N-1] + B*u[N-1] = 0
-	// 	printf("[GRADIENT RECOVERY] Constraint structure:\n");
-	// 	printf("  Total constraints: %d (should be N*nx = %d*%d = %d)\n",
-	// 	       nC, mpcData.N, mpcData.nx, mpcData.N * mpcData.nx);
-	// 	printf("  Each constraint k: -x[k+1] + A*x[k] + B*u[k] = 0\n");
-	// }
-	// #endif
-	
 	switch ( hessianType )
 	{
 		case HST_ZERO:
@@ -3352,47 +3229,15 @@ returnValue QProblem::setupAuxiliaryQPgradient( )
 			for ( i=0; i<nV; ++i ) {
 				g[i] = y[i];
 			}
-			
-			// #ifndef __SUPPRESSANYOUTPUT__
-			// printf("[GRADIENT RECOVERY] After yB term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-			//        g[0], g[1], g[2], g[3], g[4], g[5]);
-			// #endif
 
 			/* - H*x */
 			H->times(1, -1.0, x, nV, 1.0, g, nV);
 			
-			// #ifndef __SUPPRESSANYOUTPUT__
-			// printf("[GRADIENT RECOVERY] After -H*x term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-			//        g[0], g[1], g[2], g[3], g[4], g[5]);
-			// #endif
 			break;
 	}
 
 	/* + A'*yC */
 	A->transTimes(1, 1.0, y + nV, nC, 1.0, g, nV);
-	
-	// #ifndef __SUPPRESSANYOUTPUT__
-	// printf("[GRADIENT RECOVERY] After A'*yC term, g[0:5]: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
-	//        g[0], g[1], g[2], g[3], g[4], g[5]);
-	// printf("[GRADIENT RECOVERY] Final recovered gradient g[0:9]:\n");
-	// for ( i=0; i<10; ++i ) {
-	// 	printf("  g[%d] = %.6f\n", i, g[i]);
-	// }
-	// #endif
-	
-	/* ========================================
-	 * NOTE: The fix for fixed variables is now handled in solveInitialQP()
-	 * by storing g_original and restoring it after setupAuxiliaryQPgradient()
-	 * ======================================== */
-
-	// #ifndef __SUPPRESSANYOUTPUT__
-	// if ( options.enableMPCRiccati == BT_TRUE && mpcData.isInitialized == BT_TRUE )
-	// {
-	// 	printf("[AUX GRADIENT] Output g[0:3] (after): [%.4f, %.4f, %.4f, %.4f]\n",
-	// 	       g[0], g[1], g[2], g[3]);
-	// 	printf("[AUX GRADIENT] Auxiliary QP gradient computed successfully\n");
-	// }
-	// #endif
 
 	return SUCCESSFUL_RETURN;
 }
@@ -3680,20 +3525,22 @@ returnValue QProblem::addConstraint(	int_t number, SubjectToStatus C_status,
 		*      of T, simultanenous change of Q (i.e. Z) and R. */
 		for( j=0; j<nZ-1; ++j )
 		{
-			computeGivens( wZ[j+1],wZ[j], wZ[j+1],wZ[j],c,s );
-			nu = s/(1.0+c);
+			if ( getAbs(wZ[j]) > 1e-8 ) {
+				computeGivens( wZ[j+1],wZ[j], wZ[j+1],wZ[j],c,s );
+				nu = s/(1.0+c);
 
-			for( i=0; i<nFR; ++i )
-			{
-				ii = FR_idx[i];
-				applyGivens( c,s,nu,QQ(ii,1+j),QQ(ii,j), QQ(ii,1+j),QQ(ii,j) );
-			}
+				for( i=0; i<nFR; ++i )
+				{
+					ii = FR_idx[i];
+					applyGivens( c,s,nu,QQ(ii,1+j),QQ(ii,j), QQ(ii,1+j),QQ(ii,j) );
+				}
 
-			if ( ( updateCholesky == BT_TRUE ) &&
-				 ( hessianType != HST_ZERO )   && ( hessianType != HST_IDENTITY ) )
-			{
-				for( i=0; i<=j+1; ++i )
-					applyGivens( c,s,nu,RR(i,1+j),RR(i,j), RR(i,1+j),RR(i,j) );
+				if ( ( updateCholesky == BT_TRUE ) &&
+					( hessianType != HST_ZERO )   && ( hessianType != HST_IDENTITY ) )
+				{
+					for( i=0; i<=j+1; ++i )
+						applyGivens( c,s,nu,RR(i,1+j),RR(i,j), RR(i,1+j),RR(i,j) );
+				}
 			}
 		}
 
@@ -3707,11 +3554,13 @@ returnValue QProblem::addConstraint(	int_t number, SubjectToStatus C_status,
 			 *      Use row-wise Givens rotations to restore upper triangular form of R. */
 			for( i=0; i<nZ-1; ++i )
 			{
-				computeGivens( RR(i,i),RR(1+i,i), RR(i,i),RR(1+i,i),c,s );
-				nu = s/(1.0+c);
+				if ( getAbs(RR(1+i,i)) > 1e-8 ) {
+					computeGivens( RR(i,i),RR(1+i,i), RR(i,i),RR(1+i,i),c,s );
+					nu = s/(1.0+c);
 
-				for( j=(1+i); j<(nZ-1); ++j ) /* last column of R is thrown away */
-					applyGivens( c,s,nu,RR(i,j),RR(1+i,j), RR(i,j),RR(1+i,j) );
+					for( j=(1+i); j<(nZ-1); ++j ) /* last column of R is thrown away */
+						applyGivens( c,s,nu,RR(i,j),RR(1+i,j), RR(i,j),RR(1+i,j) );
+				}
 			}
 			/* last column of R is thrown away */
 			for( i=0; i<nZ; ++i )
@@ -8026,146 +7875,92 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
 			}
 		}
         
-        #ifndef __SUPPRESSANYOUTPUT__
-        printf("[RICCATI COSTATE] lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
-               lambda_opt[0], lambda_opt[1], lambda_opt[2], lambda_opt[3]);
-        printf("[RICCATI COSTATE] lambda[N-1]: [%.4f, %.4f, %.4f, %.4f]\n",
-               lambda_opt[(N-1)*nx], lambda_opt[(N-1)*nx+1], lambda_opt[(N-1)*nx+2], lambda_opt[(N-1)*nx+3]);
-        printf("[RICCATI COSTATE] lambda[N]: [%.4f, %.4f, %.4f, %.4f]\n",
-               lambda_opt[N*nx], lambda_opt[N*nx+1], lambda_opt[N*nx+2], lambda_opt[N*nx+3]);
+        // #ifndef __SUPPRESSANYOUTPUT__
+        // printf("[RICCATI COSTATE] lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
+        //        lambda_opt[0], lambda_opt[1], lambda_opt[2], lambda_opt[3]);
+        // printf("[RICCATI COSTATE] lambda[N-1]: [%.4f, %.4f, %.4f, %.4f]\n",
+        //        lambda_opt[(N-1)*nx], lambda_opt[(N-1)*nx+1], lambda_opt[(N-1)*nx+2], lambda_opt[(N-1)*nx+3]);
+        // printf("[RICCATI COSTATE] lambda[N]: [%.4f, %.4f, %.4f, %.4f]\n",
+        //        lambda_opt[N*nx], lambda_opt[N*nx+1], lambda_opt[N*nx+2], lambda_opt[N*nx+3]);
         
-        /* ========================================
-         * VERIFY: λ[k] satisfies λ[k] = Q*x[k] + g_x[k] + A'*λ[k+1]
-         * ======================================== */
-        if ( g != 0 )
-        {
-            printf("\n[COSTATE VERIFICATION] Checking λ[k] = Q*x[k] + g_x[k] + A'*λ[k+1]\n");
+        // /* ========================================
+        //  * VERIFY: λ[k] satisfies λ[k] = Q*x[k] + g_x[k] + A'*λ[k+1]
+        //  * ======================================== */
+        // if ( g != 0 )
+        // {
+        //     printf("\n[COSTATE VERIFICATION] Checking λ[k] = Q*x[k] + g_x[k] + A'*λ[k+1]\n");
             
-            real_t* A_k = mpcData.A;
-            real_t* Q_k = mpcData.Q;
+        //     real_t* A_k = mpcData.A;
+        //     real_t* Q_k = mpcData.Q;
             
-            int num_failures = 0;
-            real_t max_residual_all = 0.0;
-            int worst_stage = -1;
+        //     int num_failures = 0;
+        //     real_t max_residual_all = 0.0;
+        //     int worst_stage = -1;
             
-            /* Check stages k=0 to N-2 (interior stages) */
-            for ( int k = 0; k < N-1; ++k )
-            {
-                real_t* x_k = &x_opt[k * nx];
-                real_t* lambda_k = &lambda_opt[k * nx];
-                real_t* lambda_next = &lambda_opt[(k+1) * nx];
-                const real_t* g_x_k = &g[k * (nx + nu)];
+        //     /* Check stages k=0 to N-2 (interior stages) */
+        //     for ( int k = 0; k < N-1; ++k )
+        //     {
+        //         real_t* x_k = &x_opt[k * nx];
+        //         real_t* lambda_k = &lambda_opt[k * nx];
+        //         real_t* lambda_next = &lambda_opt[(k+1) * nx];
+        //         const real_t* g_x_k = &g[k * (nx + nu)];
                 
-                /* Compute RHS: Q*x[k] + g_x[k] + A'*λ[k+1] */
-                real_t lambda_check[4] = {0, 0, 0, 0};
+        //         /* Compute RHS: Q*x[k] + g_x[k] + A'*λ[k+1] */
+        //         real_t lambda_check[4] = {0, 0, 0, 0};
                 
-                /* Q*x[k] + g_x[k] */
-                for ( int i = 0; i < nx; ++i )
-                {
-                    lambda_check[i] = g_x_k[i];
-                    for ( int j = 0; j < nx; ++j )
-                        lambda_check[i] += Q_k[i*nx + j] * x_k[j];
-                }
+        //         /* Q*x[k] + g_x[k] */
+        //         for ( int i = 0; i < nx; ++i )
+        //         {
+        //             lambda_check[i] = g_x_k[i];
+        //             for ( int j = 0; j < nx; ++j )
+        //                 lambda_check[i] += Q_k[i*nx + j] * x_k[j];
+        //         }
                 
-                /* + A'*λ[k+1] */
-                for ( int i = 0; i < nx; ++i )
-                    for ( int j = 0; j < nx; ++j )
-                        lambda_check[i] += A_k[j*nx + i] * lambda_next[j];
+        //         /* + A'*λ[k+1] */
+        //         for ( int i = 0; i < nx; ++i )
+        //             for ( int j = 0; j < nx; ++j )
+        //                 lambda_check[i] += A_k[j*nx + i] * lambda_next[j];
                 
-                /* Compute residual */
-                real_t max_residual = 0.0;
-                for ( int i = 0; i < nx; ++i )
-                {
-                    real_t residual = getAbs(lambda_check[i] - lambda_k[i]);
-                    if ( residual > max_residual ) max_residual = residual;
-                }
+        //         /* Compute residual */
+        //         real_t max_residual = 0.0;
+        //         for ( int i = 0; i < nx; ++i )
+        //         {
+        //             real_t residual = getAbs(lambda_check[i] - lambda_k[i]);
+        //             if ( residual > max_residual ) max_residual = residual;
+        //         }
                 
-                if ( max_residual > 1e-6 )
-                {
-                    num_failures++;
-                    if ( num_failures <= 3 )
-                    {
-                        printf("  ✗ FAIL at k=%d: residual = %.6e\n", k, max_residual);
-                        printf("    λ[k] (computed) = [%.4f, %.4f, %.4f, %.4f]\n", 
-                               lambda_k[0], lambda_k[1], lambda_k[2], lambda_k[3]);
-                        printf("    λ[k] (expected)  = [%.4f, %.4f, %.4f, %.4f]\n", 
-                               lambda_check[0], lambda_check[1], lambda_check[2], lambda_check[3]);
-                    }
-                }
+        //         if ( max_residual > 1e-6 )
+        //         {
+        //             num_failures++;
+        //             if ( num_failures <= 3 )
+        //             {
+        //                 printf("  ✗ FAIL at k=%d: residual = %.6e\n", k, max_residual);
+        //                 printf("    λ[k] (computed) = [%.4f, %.4f, %.4f, %.4f]\n", 
+        //                        lambda_k[0], lambda_k[1], lambda_k[2], lambda_k[3]);
+        //                 printf("    λ[k] (expected)  = [%.4f, %.4f, %.4f, %.4f]\n", 
+        //                        lambda_check[0], lambda_check[1], lambda_check[2], lambda_check[3]);
+        //             }
+        //         }
                 
-                if ( max_residual > max_residual_all )
-                {
-                    max_residual_all = max_residual;
-                    worst_stage = k;
-                }
-            }
-            
-            /* Check terminal stage k=N-1 separately */
-            {
-                int k = N-1;
-                real_t* x_k = &x_opt[k * nx];
-                real_t* x_next = &x_opt[N * nx];
-                real_t* lambda_k = &lambda_opt[k * nx];
-                const real_t* g_x_k = &g[k * (nx + nu)];
-                const real_t* g_x_terminal = &g[N * (nx + nu)];
-                
-                real_t lambda_check[4] = {0, 0, 0, 0};
-                
-                /* Q*x[N-1] + g_x[N-1] */
-                for ( int i = 0; i < nx; ++i )
-                {
-                    lambda_check[i] = g_x_k[i];
-                    for ( int j = 0; j < nx; ++j )
-                        lambda_check[i] += Q_k[i*nx + j] * x_k[j];
-                }
-                
-                /* + A'*(Q*x[N] + g_x[N]) */
-                real_t terminal_grad[4] = {0, 0, 0, 0};
-                for ( int i = 0; i < nx; ++i )
-                {
-                    terminal_grad[i] = g_x_terminal[i];
-                    for ( int j = 0; j < nx; ++j )
-                        terminal_grad[i] += Q_k[i*nx + j] * x_next[j];
-                }
-				printf("    λ[N-1] (YCCHEN)  = [%.4f, %.4f, %.4f, %.4f]\n", 
-					terminal_grad[0], terminal_grad[1], terminal_grad[2], terminal_grad[3]);
-                
-                for ( int i = 0; i < nx; ++i )
-                    for ( int j = 0; j < nx; ++j )
-                        lambda_check[i] += A_k[j*nx + i] * terminal_grad[j];
-				printf("λ[N-2] (YCCHEN)  = [%.4f, %.4f, %.4f, %.4f]\n", 
-					lambda_check[0], lambda_check[1], lambda_check[2], lambda_check[3]);
-                real_t max_residual = 0.0;
-                for ( int i = 0; i < nx; ++i )
-                {
-                    real_t residual = getAbs(lambda_check[i] - lambda_k[i]);
-                    if ( residual > max_residual ) max_residual = residual;
-                }
-                
-                if ( max_residual > 1e-6 )
-                {
-                    num_failures++;
-                    printf("  ✗ FAIL at k=%d (terminal): residual = %.6e\n", k, max_residual);
-                }
-                
-                if ( max_residual > max_residual_all )
-                {
-                    max_residual_all = max_residual;
-                    worst_stage = k;
-                }
-            }
-            
-            printf("\n[COSTATE VERIFICATION SUMMARY]\n");
-            printf("  Total stages: %d\n", N);
-            printf("  Failures: %d/%d\n", num_failures, N);
-            printf("  Max residual: %.6e (at k=%d)\n", max_residual_all, worst_stage);
-            if ( num_failures == 0 )
-                printf("  ✓ PASS: All costate equations satisfied!\n");
-            else
-                printf("  ✗ FAIL: %d stages violated costate equation!\n", num_failures);
-        }
+        //         if ( max_residual > max_residual_all )
+        //         {
+
+        //             max_residual_all = max_residual;
+        //             worst_stage = k;
+        //         }
+        //     }
+                        
+        //     printf("\n[COSTATE VERIFICATION SUMMARY]\n");
+        //     printf("  Total stages: %d\n", N);
+        //     printf("  Failures: %d/%d\n", num_failures, N);
+        //     printf("  Max residual: %.6e (at k=%d)\n", max_residual_all, worst_stage);
+        //     if ( num_failures == 0 )
+        //         printf("  ✓ PASS: All costate equations satisfied!\n");
+        //     else
+        //         printf("  ✗ FAIL: %d stages violated costate equation!\n", num_failures);
+        // }
         
-        #endif
+        // #endif
     }
     
     /* ========================================
@@ -8793,6 +8588,19 @@ returnValue QProblem::setupMPCTQfactorisation( )
     
     return SUCCESSFUL_RETURN;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 END_NAMESPACE_QPOASES

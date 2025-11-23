@@ -9,6 +9,11 @@ The primary impact of this feature is that it makes **real-time, complex multi-a
 - **Real-Time Performance:** Solving complex scenarios (e.g., 6 agents in a crossing pattern) at speeds suitable for robotics and autonomous systems.
 - **Enhanced Scalability:** Managing the computational burden as the number of agents and their interactions grow, which is critical for applications like drone swarms or warehouse automation.
 - **More Complex Scenarios:** Allowing users to tackle problems with longer planning horizons or a higher number of agents that were previously computationally prohibitive.
+## Interactive Visualization
+
+You can interact with the 6-agent scenario here:
+https://claude.ai/public/artifacts/ca114b27-1b36-4d00-8cde-eb6a9f8d66c7
+
 
 ## 📊 Performance Evidence
 

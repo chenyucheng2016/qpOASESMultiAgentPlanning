@@ -1,5 +1,3 @@
-![agents_trajectory](https://github.com/user-attachments/assets/f505176c-88c3-4e9e-b2e6-7d356d6bc1ca)# The Impact of Riccati Warm Start on Multi-Agent MPC
-
 This repository demonstrates the significant performance gains achieved by using a Riccati-based primal-dual warm start for multi-agent motion planning. The evidence provided by the 2, 4, and 6-agent test scenarios shows that this feature is critical for enabling real-time, complex multi-agent control.
 
 ## 🚀 The Impact of This Work

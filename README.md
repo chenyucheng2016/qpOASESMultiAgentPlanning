@@ -1,6 +1,6 @@
 This repository demonstrates the significant performance gains achieved by using a Riccati-based primal-dual warm start for multi-agent motion planning. The evidence provided by the 2, 4, and 6-agent test scenarios shows that this feature is critical for enabling real-time, complex multi-agent control.
 
-## 🚀 The Impact of This Work
+## The Impact of This Work
 
 The primary impact of this feature is that it makes **real-time, complex multi-agent MPC feasible** for a new class of applications. By reducing the core QP solver iterations by **70-95%**, this work enables:
 
@@ -17,7 +17,7 @@ The primary impact of this feature is that it makes **real-time, complex multi-a
 https://claude.ai/public/artifacts/ca114b27-1b36-4d00-8cde-eb6a9f8d66c7
 
 
-## 📊 Performance Evidence
+## Performance Evidence
 
 The following tables compare the performance of the TurboADMM solver with and without the Riccati warm start feature across three increasingly complex collision avoidance scenarios.
 
@@ -47,7 +47,7 @@ All processing is conducted on Intel(R) Core(TM) Ultra 7 155H.
 | 4-agent  | **87.0%** (184 → 24)   | **69.7%** (52ms → 16ms)|
 | 6-agent  | **69.8%** (344 → 104)  | **61.3%** (99ms → 38ms)  |
 
-## 🔧 How to Verify the Results
+## How to Verify the Results
 
 You can download this code and run the tests on your own to validate these results.
 

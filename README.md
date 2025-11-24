@@ -1,12 +1,13 @@
 This repository demonstrates the significant performance gains achieved by using a Riccati-based primal-dual warm start for multi-agent motion planning. The evidence provided by the 2, 4, and 6-agent test scenarios shows that this feature is critical for enabling real-time, complex multi-agent control.
 
-## The Impact of This Work
+## Purpose
 
-The primary impact of this feature is that it makes **real-time, complex multi-agent MPC feasible** for a new class of applications. By reducing the core QP solver iterations by **70-95%**, this work enables:
+The goal of this project is real-time, complex, heterogeneous multi‑agent control. Rather than a full planner, it provides a fast multi‑agent trajectory optimization engine that can be embedded inside a planner. Built on qpOASES, it exploits the hotstart mechanism to reuse KKT factorizations across iterations. Multi‑agent coordination is formulated in a distributed fashion via ADMM, with coupling handled by Lagrangian multipliers. This framework, although solving problems iteratively, is more scalable than the centralized approaches that require monolithic Schur‑complement solves of arrowhead‑structured Hessians.
 
-- **Real-Time Performance:** Solving complex scenarios (e.g., 6 agents in a crossing pattern) at speeds suitable for robotics and autonomous systems.
-- **Enhanced Scalability:** Managing the computational burden as the number of agents and their interactions grow, which is critical for applications like drone swarms or warehouse automation.
-- **More Complex Scenarios:** Allowing users to tackle problems with longer planning horizons or a higher number of agents that were previously computationally prohibitive.
+## Methodology
+
+#TBD
+
 ## Visualizations
 
 ### 4-agent trajectories visualization
@@ -82,3 +83,11 @@ Execute the compiled test files from the `tests/` directory:
 ```
 
 Each test will print a detailed analysis of the trajectory, collision avoidance, and performance statistics, allowing you to verify the results documented above.
+
+## The Impact of This Work
+
+The primary impact of this feature is that it makes **real-time, complex multi-agent MPC feasible** for a new class of applications. By reducing the core QP solver iterations by **70-95%**, this work enables:
+
+- **Real-Time Performance:** Solving complex scenarios (e.g., 6 agents in a crossing pattern) at speeds suitable for robotics and autonomous systems.
+- **Enhanced Scalability:** Managing the computational burden as the number of agents and their interactions grow, which is critical for applications like drone swarms or warehouse automation.
+- **More Complex Scenarios:** Allowing users to tackle problems with longer planning horizons or a higher number of agents that were previously computationally prohibitive.

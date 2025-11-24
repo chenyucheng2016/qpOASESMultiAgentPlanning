@@ -37,6 +37,8 @@ The following tables compare the performance of the TurboADMM solver with and wi
 | 4-agent  | 6               | 24                  | 15.75 ms   | YES       |
 | 6-agent  | 24              | 104                 | 38.49 ms   | YES       |
 
+All processing is conducted on Intel(R) Core(TM) Ultra 7 155H.
+
 ### Summary of Performance Gains
 
 | Scenario | QP Iteration Reduction | Solve Time Reduction |

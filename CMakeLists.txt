@@ -120,6 +120,7 @@ endif("${isSystemDir}" STREQUAL "-1")
 #################### build and install #####################
 ############################################################
 INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR}/include)
+include_directories(/usr/local/include)
 # compile qpOASES libraries
 FILE(GLOB SRC src/*.cpp)
 
@@ -199,9 +200,12 @@ endif(QPOASES_BUILD_EXAMPLES)
 ######################### tests ###########################
 ############################################################
 
-# TurboADMM tests
-ADD_EXECUTABLE(test_admm_basic tests/test_admm_basic.cpp)
-TARGET_LINK_LIBRARIES(test_admm_basic qpOASES)
+find_package(osqp REQUIRED)
+
+link_directories(/usr/local/lib)
+
+ADD_EXECUTABLE(test_2agent_rho25_osqp tests/test_2agent_rho25_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_2agent_rho25_osqp qpOASES osqp)
 
 ##
 ##   end of file

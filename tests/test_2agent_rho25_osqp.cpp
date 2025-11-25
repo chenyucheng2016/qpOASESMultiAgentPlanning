@@ -317,64 +317,7 @@ int main()
         l[row] = -OSQP_INFTY;
         u[row] = OSQP_INFTY;
     }
-    
-    // ====== DIAGNOSTIC LOGGING ======
-    printf("\n=== QP PROBLEM DIAGNOSTICS ===\n");
-    printf("Problem size: nV=%d, m=%d\n", nV, m);
-    printf("  Variables: %d states + %d controls per agent, 2 agents\n", (N+1)*nx, N*nu);
-    printf("  Constraints: %d dynamics + %d bounds + %d coupling\n", n_dyn, n_bounds, n_coupling);
-    
-    // Check initial state bounds
-    printf("\nInitial state bounds (Agent 0, k=0):\n");
-    for (int j = 0; j < nx; ++j) {
-        int row_ub = n_dyn + j;
-        int row_lb = n_dyn + nV + j;
-        printf("  State[%d]: l[%d]=%.4f (should be -%.4f), u[%d]=%.4f (should be %.4f)\n",
-               j, row_lb, l[row_lb], agents[0].x_ref[j], row_ub, u[row_ub], agents[0].x_ref[j]);
-    }
-    printf("\nInitial state bounds (Agent 1, k=0):\n");
-    for (int j = 0; j < nx; ++j) {
-        int row_ub = n_dyn + nV_agent + j;
-        int row_lb = n_dyn + nV + nV_agent + j;
-        printf("  State[%d]: l[%d]=%.4f (should be -%.4f), u[%d]=%.4f (should be %.4f)\n",
-               j, row_lb, l[row_lb], agents[1].x_ref[j], row_ub, u[row_ub], agents[1].x_ref[j]);
-    }
-    
-    // Check cost gradient
-    printf("\nCost gradient q (first 10 elements):\n");
-    for (int i = 0; i < 10 && i < nV; ++i) {
-        printf("  q[%d] = %.6f\n", i, q[i]);
-    }
-    
-    // Check Hessian diagonal
-    printf("\nHessian P diagonal (first 10 elements):\n");
-    for (int i = 0; i < 10 && i < (int)P_x.size(); ++i) {
-        printf("  P[%d,%d] = %.6f\n", P_i[i], P_i[i], P_x[i]);
-    }
-    
-    // Print ALL constraint bounds
-    printf("\n=== CONSTRAINT BOUNDS VERIFICATION ===\n");
-    printf("Dynamics constraints (rows 0-%d): should all be l=u=0\n", n_dyn-1);
-    for (int i = 0; i < n_dyn && i < 20; ++i) {
-        printf("  Row %d: l=%.6f, u=%.6f\n", i, l[i], u[i]);
-    }
-    if (n_dyn > 20) printf("  ... (%d more dynamics rows)\n", n_dyn - 20);
-    
-    printf("\nBound constraints (rows %d-%d):\n", n_dyn, n_dyn + n_bounds - 1);
-    printf("First 20 bound constraints:\n");
-    for (int i = n_dyn; i < n_dyn + n_bounds && i < n_dyn + 20; ++i) {
-        int var_idx = i - n_dyn;
-        const char* type = (var_idx < nV) ? "upper" : "lower";
-        printf("  Row %d (%s bound var %d): l=%.6f, u=%.6f\n", 
-               i, type, var_idx % nV, l[i], u[i]);
-    }
-    
-    printf("\nCoupling constraints (rows %d-%d): should be l=2.0, u=INF\n", 
-           n_dyn + n_bounds, n_dyn + n_bounds + n_coupling - 1);
-    for (int i = n_dyn + n_bounds; i < m; ++i) {
-        printf("  Row %d: l=%.6f, u=%.6f\n", i, l[i], u[i]);
-    }
-    printf("\n");
+
     
     // Create matrices
     OSQPCscMatrix* P = OSQPCscMatrix_new(nV, nV, P_x.size(), P_x.data(), P_i.data(), P_p.data());
@@ -382,7 +325,7 @@ int main()
     
     // Settings
     OSQPSettings* settings = OSQPSettings_new();
-    settings->verbose = 1;
+    settings->verbose = 0;
     settings->max_iter = 20000;
     // settings->eps_abs = 1e-3;
     // settings->eps_rel = 1e-3;
@@ -394,7 +337,7 @@ int main()
     
     // SQP loop
     const int max_sqp_iter = 300;
-    const real_t constraint_tol = 1e-2;  // 1mm tolerance for collision constraints
+    const real_t constraint_tol = 2e-3;  // 1mm tolerance for collision constraints
     const real_t objective_tol = 2e-3;  // Relative objective change tolerance for convergence
     
     std::vector<real_t> current_trajectory(nV, 0.0);
@@ -435,8 +378,6 @@ int main()
     int final_iter = 0;
     
     for (int sqp_iter = 0; sqp_iter < max_sqp_iter; ++sqp_iter) {
-        printf("\n=== SQP Iteration %d ===\n", sqp_iter);
-        
         // Save previous trajectory for convergence check
         previous_trajectory = current_trajectory;
         
@@ -445,7 +386,6 @@ int main()
         
         // Add coupling constraints based on current_trajectory
         int num_active_collisions = 0;
-        printf("\nCoupling constraint activation (SQP iter %d):\n", sqp_iter);
         for (int k = 0; k <= N; ++k) {
             int row = n_dyn + n_bounds + k;
             int idx = k * (nx + nu);
@@ -473,17 +413,12 @@ int main()
                 // Set bounds for active constraint
                 l[row] = d_safe;
                 u[row] = OSQP_INFTY;
-                if (num_active_collisions <= 5) {
-                    printf("  k=%d: p0=(%.2f,%.2f) p1=(%.2f,%.2f) dist=%.3f < %.1f ACTIVE\n",
-                           k, p0x, p0y, p1x, p1y, dist, d_safe);
-                }
             } else {
                 // Agents are far - constraint inactive
                 l[row] = -OSQP_INFTY;
                 u[row] = OSQP_INFTY;
             }
         }
-        printf("  Total active collision constraints: %d/%d\n", num_active_collisions, N+1);
         
         // Sort A triplets
         std::sort(A_triplets.begin(), A_triplets.end(), [](const Triplet& a, const Triplet& b) {
@@ -541,20 +476,7 @@ int main()
             current_trajectory[j] = solution[j];
         }
         
-        printf("OSQP status: %s\n", solver->info->status);
-        printf("OSQP iterations: %d\n", (int)solver->info->iter);
-        printf("OSQP objective: %.6e\n", solver->info->obj_val);
-        
-        // Check initial state violations
-        printf("Initial state check:\n");
-        printf("  Agent 0 k=0: (%.4f, %.4f, %.4f, %.4f) vs bounds u=(%.4f, %.4f, %.4f, %.4f) l=(%.4f, %.4f, %.4f, %.4f)\n",
-               solver->solution->x[0], solver->solution->x[1], solver->solution->x[2], solver->solution->x[3],
-               u[n_dyn+0], u[n_dyn+1], u[n_dyn+2], u[n_dyn+3],
-               l[n_dyn+nV+0], l[n_dyn+nV+1], l[n_dyn+nV+2], l[n_dyn+nV+3]);
-        printf("  Agent 1 k=0: (%.4f, %.4f, %.4f, %.4f) vs bounds u=(%.4f, %.4f, %.4f, %.4f) l=(%.4f, %.4f, %.4f, %.4f)\n",
-               solver->solution->x[nV_agent], solver->solution->x[nV_agent+1], solver->solution->x[nV_agent+2], solver->solution->x[nV_agent+3],
-               u[n_dyn+nV_agent], u[n_dyn+nV_agent+1], u[n_dyn+nV_agent+2], u[n_dyn+nV_agent+3],
-               l[n_dyn+nV+nV_agent], l[n_dyn+nV+nV_agent+1], l[n_dyn+nV+nV_agent+2], l[n_dyn+nV+nV_agent+3]);
+
         
         osqp_cleanup(solver);
         OSQPCscMatrix_free(A_new);
@@ -576,25 +498,19 @@ int main()
             real_t viol = d_safe - dist;
             if (viol > max_constraint_viol) max_constraint_viol = viol;
         }
-        printf("Min distance: %.4f m, Max constraint violation: %.4e m\n", min_dist_iter, max_constraint_viol);
         
         // Compute objective change
         real_t current_objective = solver->info->obj_val;
         real_t obj_change = fabs(current_objective - previous_objective);
         real_t rel_obj_change = (fabs(previous_objective) > 1e-10) ? 
                                  obj_change / fabs(previous_objective) : obj_change;
-        printf("Objective: %.6e, Change: %.4e (rel: %.4e)\n", 
-               current_objective, obj_change, rel_obj_change);
         
         // Check convergence
         final_iter = sqp_iter + 1;
         if (max_constraint_viol <= 0.0 && rel_obj_change < objective_tol) {
-            printf("\n*** SQP CONVERGED: Constraints satisfied and objective converged ***\n");
             converged = true;
             previous_objective = current_objective;
             break;
-        } else if (sqp_iter == max_sqp_iter - 1) {
-            printf("\n*** SQP TERMINATED: Max iterations reached ***\n");
         }
         
         // Update previous objective for next iteration

@@ -1,10 +1,3 @@
-/*
- * Test: 2-Agent with ρ=25 using OSQP
- *
- * Comparative example using OSQP to solve the decoupled MPC problem
- * (without ADMM coupling, for simplicity)
- */
-
 #include <stdlib.h>
 #include <osqp/osqp.h>
 #include <qpOASES/TurboADMM.hpp>
@@ -243,20 +236,28 @@ int main()
         OSQPFloat dx = x0_ref - x1_ref;
         OSQPFloat dy = y0_ref - y1_ref;
         OSQPFloat dist = sqrt(dx*dx + dy*dy);
-        if (dist > 0 && dist < d_safe) {
-            OSQPFloat nx_c = dx / dist;
-            OSQPFloat ny_c = dy / dist;
-            // n · (p0 - p1) >= d
-            // nx*(x0 - x1) + ny*(y0 - y1) >= d
-            int idx_x0 = k * (nx + nu);
-            int idx_y0 = idx_x0 + 1;
-            int idx_x1 = nV_agent + k * (nx + nu);
-            int idx_y1 = idx_x1 + 1;
-            A_triplets.push_back({row, idx_x0, nx_c});
-            A_triplets.push_back({row, idx_y0, ny_c});
-            A_triplets.push_back({row, idx_x1, -nx_c});
-            A_triplets.push_back({row, idx_y1, -ny_c});
+        
+        // Always activate constraint, use safe default normal if agents are too close in reference
+        OSQPFloat nx_c, ny_c;
+        if (dist > 1e-3) {
+            nx_c = dx / dist;
+            ny_c = dy / dist;
+        } else {
+            // Use horizontal separation as default when reference trajectories overlap
+            nx_c = 1.0;
+            ny_c = 0.0;
         }
+        
+        // n · (p0 - p1) >= d
+        // nx*(x0 - x1) + ny*(y0 - y1) >= d
+        int idx_x0 = k * (nx + nu);
+        int idx_y0 = idx_x0 + 1;
+        int idx_x1 = nV_agent + k * (nx + nu);
+        int idx_y1 = idx_x1 + 1;
+        A_triplets.push_back({row, idx_x0, nx_c});
+        A_triplets.push_back({row, idx_y0, ny_c});
+        A_triplets.push_back({row, idx_x1, -nx_c});
+        A_triplets.push_back({row, idx_y1, -ny_c});
     }
     
     // Sort A triplets
@@ -327,10 +328,7 @@ int main()
     OSQPSettings* settings = OSQPSettings_new();
     settings->verbose = 0;
     settings->max_iter = 20000;
-    // settings->eps_abs = 1e-3;
-    // settings->eps_rel = 1e-3;
-    // settings->eps_prim_inf = 1e-3;
-    // settings->eps_dual_inf = 1e-3;
+
     
     // Solver
     OSQPSolver* solver;
@@ -476,7 +474,8 @@ int main()
             current_trajectory[j] = solution[j];
         }
         
-
+        // Store objective value before cleanup
+        real_t current_objective = solver->info->obj_val;
         
         osqp_cleanup(solver);
         OSQPCscMatrix_free(A_new);
@@ -500,7 +499,6 @@ int main()
         }
         
         // Compute objective change
-        real_t current_objective = solver->info->obj_val;
         real_t obj_change = fabs(current_objective - previous_objective);
         real_t rel_obj_change = (fabs(previous_objective) > 1e-10) ? 
                                  obj_change / fabs(previous_objective) : obj_change;

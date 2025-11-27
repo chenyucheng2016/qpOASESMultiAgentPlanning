@@ -207,6 +207,12 @@ link_directories(/usr/local/lib)
 ADD_EXECUTABLE(test_2agent_rho25_osqp tests/test_2agent_rho25_osqp.cpp)
 TARGET_LINK_LIBRARIES(test_2agent_rho25_osqp qpOASES osqp)
 
+ADD_EXECUTABLE(test_4agent_rho25_osqp tests/test_4agent_rho25_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_4agent_rho25_osqp qpOASES osqp)
+
+ADD_EXECUTABLE(test_6agent_osqp tests/test_6agent_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_6agent_osqp qpOASES osqp)
+
 ##
 ##   end of file
 ##

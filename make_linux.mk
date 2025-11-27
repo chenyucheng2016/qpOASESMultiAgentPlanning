@@ -112,7 +112,7 @@ endif
 
 
 # CPPFLAGS = -Wall $(EXT_IDIR) -pedantic -Wshadow -Wfloat-equal -O3 -Wconversion -Wsign-conversion -fPIC -DLINUX -D__USE_LONG_INTEGERS__ -D__USE_LONG_FINTS__ -D${DEF_SOLVER} -D__NO_COPYRIGHT__
-CPPFLAGS = -Wall $(EXT_IDIR) -pedantic -Wshadow -Wfloat-equal -O3 -Wconversion -Wsign-conversion -fPIC -DLINUX  -D${DEF_SOLVER} -D__NO_COPYRIGHT__
+CPPFLAGS = -Wall $(EXT_IDIR) -pedantic -Wshadow -Wfloat-equal -O3 -Wconversion -Wsign-conversion -fPIC -DLINUX  -D${DEF_SOLVER} -D__NO_COPYRIGHT__ -D__SUPPRESSANYOUTPUT__ -fopenmp
 #          -g -D__DEBUG__ -D__NO_COPYRIGHT__ -D__SUPPRESSANYOUTPUT__ -D__USE_SINGLE_PRECISION__
 
 # libraries to link against when building qpOASES .so files

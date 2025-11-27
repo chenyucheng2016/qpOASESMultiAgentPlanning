@@ -2905,20 +2905,6 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 	int nAddedConstraints = 0;
 	int nFailedLICheck = 0;
 	
-	#ifndef __SUPPRESSANYOUTPUT__
-	if ( mpcData.isInitialized == BT_TRUE ) {
-		printf("\n[SETUP AUX WS] Starting equality constraint activation loop...\n");
-		printf("[SETUP AUX WS] Current nAC (before adding equalities): %d\n", getNAC());
-		
-		// Count how many equality constraints are currently inactive
-		int num_inactive_eq = 0;
-		for( i=0; i<nC; ++i ) {
-			if ( constraints.getType(i) == ST_EQUALITY && constraints.getStatus(i) == ST_INACTIVE )
-				num_inactive_eq++;
-		}
-		printf("[SETUP AUX WS] Number of INACTIVE equality constraints to add: %d\n", num_inactive_eq);
-	}
-	#endif
 	
 	for( i=0; i<nC; ++i )
 	{
@@ -2929,12 +2915,6 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 		if ( ( constraints.getType( i ) == ST_EQUALITY ) && ( constraints.getStatus( i ) == ST_INACTIVE ) )
 		{
 			nEqualityConstraints++;
-			
-			#ifndef __SUPPRESSANYOUTPUT__
-			if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
-				printf("[SETUP AUX WS] Processing equality constraint C[%d]...\n", i);
-			}
-			#endif
 			
 			/* For MPC dynamics constraints during auxiliary QP setup, skip LI check
 			 * and call addConstraint() directly.
@@ -2953,12 +2933,6 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 				if ( addConstraint( i, ST_LOWER, updateCholesky ) != SUCCESSFUL_RETURN )
 					return THROWERROR( RET_SETUP_WORKINGSET_FAILED );
 				nAddedConstraints++;
-				
-				#ifndef __SUPPRESSANYOUTPUT__
-				if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
-					printf("[SETUP AUX WS]   ✓ C[%d] added successfully (LI check SKIPPED for MPC)\n", i);
-				}
-				#endif
 			}
 			else
 			{
@@ -2968,41 +2942,16 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 					if ( addConstraint( i,ST_LOWER,updateCholesky ) != SUCCESSFUL_RETURN )
 						return THROWERROR( RET_SETUP_WORKINGSET_FAILED );
 					nAddedConstraints++;
-					
-					#ifndef __SUPPRESSANYOUTPUT__
-					if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
-						printf("[SETUP AUX WS]   ✓ C[%d] added successfully (LI check passed)\n", i);
-					}
-					#endif
 				}
 				else
 				{
 					/* Equalities are not linearly independent! */
 					constraints.setType(i, ST_BOUNDED);
 					nFailedLICheck++;
-					
-					#ifndef __SUPPRESSANYOUTPUT__
-					if ( mpcData.isInitialized == BT_TRUE && (i < 4 || i >= nC-4) ) {
-						printf("[SETUP AUX WS]   ✗ C[%d] FAILED LI check - converted to BOUNDED\n", i);
-					}
-					#endif
 				}
 			}
 		}
 	}
-	
-	#ifndef __SUPPRESSANYOUTPUT__
-	if ( setupAfresh == BT_TRUE )
-	{
-		printf("[SETUP AUX WS] Equality constraint summary:\n");
-		printf("  Total equality constraints: %d\n", nEqualityConstraints);
-		printf("  Skipped LI check (MPC dynamics): %d\n", nSkippedLICheck);
-		printf("  Passed LI check: %d\n", nAddedConstraints - nSkippedLICheck);
-		printf("  Failed LI check: %d\n", nFailedLICheck);
-		printf("  Successfully added to active set: %d\n", nAddedConstraints);
-		printf("  Current nAC after adding equalities: %d\n", getNAC());
-	}
-	#endif
 
 
 	/* 3) Add all inactive bounds that shall be active AND
@@ -3042,75 +2991,75 @@ returnValue QProblem::setupAuxiliaryWorkingSet(	const Bounds* const auxiliaryBou
 	options.enableFullLITests = was_fulli;
 	options.epsLITests = backupEpsLITests;
 
-	#ifndef __SUPPRESSANYOUTPUT__
-	if ( mpcData.isInitialized == BT_TRUE ) {
-		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-		printf("[AUX WS COMPLETE] Auxiliary working set setup complete\n");
-		printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	// #ifndef __SUPPRESSANYOUTPUT__
+	// if ( mpcData.isInitialized == BT_TRUE ) {
+	// 	printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+	// 	printf("[AUX WS COMPLETE] Auxiliary working set setup complete\n");
+	// 	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 		
-		// Check dimensions
-		printf("[AUX WS STATE] Problem dimensions:\n");
-		printf("  nV=%d, nC=%d, nFR=%d, nFX=%d, nAC=%d, nIAC=%d\n",
-		       nV, nC, getNFR(), getNFX(), getNAC(), getNIAC());
-		printf("  nZ=%d (null space dimension)\n", getNZ());
+	// 	// Check dimensions
+	// 	printf("[AUX WS STATE] Problem dimensions:\n");
+	// 	printf("  nV=%d, nC=%d, nFR=%d, nFX=%d, nAC=%d, nIAC=%d\n",
+	// 	       nV, nC, getNFR(), getNFX(), getNAC(), getNIAC());
+	// 	printf("  nZ=%d (null space dimension)\n", getNZ());
 		
-		// Check Q matrix (null space basis)
-		if ( Q != 0 ) {
-			printf("[AUX WS STATE] Q matrix: ALLOCATED (size=%d)\n", sizeT);
-			printf("  Q[0,0] = %.6e\n", Q[0]);
-			printf("  Q[1,1] = %.6e\n", (sizeT > 1) ? Q[sizeT+1] : 0.0);
-		} else {
-			printf("[AUX WS STATE] Q matrix: NULL (NOT ALLOCATED!)\n");
-		}
+	// 	// Check Q matrix (null space basis)
+	// 	if ( Q != 0 ) {
+	// 		printf("[AUX WS STATE] Q matrix: ALLOCATED (size=%d)\n", sizeT);
+	// 		printf("  Q[0,0] = %.6e\n", Q[0]);
+	// 		printf("  Q[1,1] = %.6e\n", (sizeT > 1) ? Q[sizeT+1] : 0.0);
+	// 	} else {
+	// 		printf("[AUX WS STATE] Q matrix: NULL (NOT ALLOCATED!)\n");
+	// 	}
 		
-		// Check T matrix (Cholesky factor)
-		if ( T != 0 ) {
-			printf("[AUX WS STATE] T matrix: ALLOCATED (size=%d)\n", sizeT);
-			printf("  T[0,0] = %.6e\n", T[0]);
-			printf("  T[1,1] = %.6e\n", (sizeT > 1) ? T[sizeT+1] : 0.0);
-		} else {
-			printf("[AUX WS STATE] T matrix: NULL (NOT ALLOCATED!)\n");
-		}
+	// 	// Check T matrix (Cholesky factor)
+	// 	if ( T != 0 ) {
+	// 		printf("[AUX WS STATE] T matrix: ALLOCATED (size=%d)\n", sizeT);
+	// 		printf("  T[0,0] = %.6e\n", T[0]);
+	// 		printf("  T[1,1] = %.6e\n", (sizeT > 1) ? T[sizeT+1] : 0.0);
+	// 	} else {
+	// 		printf("[AUX WS STATE] T matrix: NULL (NOT ALLOCATED!)\n");
+	// 	}
 		
-		// Check R matrix (constraint matrix factorization)
-		real_t* R_ptr = 0;
-		int_t dimR = 0;
-		if ( constraints.getActive()->getLength() > 0 ) {
-			// R matrix should exist if there are active constraints
-			printf("[AUX WS STATE] Active constraints: %d\n", constraints.getActive()->getLength());
-			printf("[AUX WS STATE] R matrix: Expected to exist for active constraints\n");
-		} else {
-			printf("[AUX WS STATE] Active constraints: 0 (no R matrix needed)\n");
-		}
+	// 	// Check R matrix (constraint matrix factorization)
+	// 	real_t* R_ptr = 0;
+	// 	int_t dimR = 0;
+	// 	if ( constraints.getActive()->getLength() > 0 ) {
+	// 		// R matrix should exist if there are active constraints
+	// 		printf("[AUX WS STATE] Active constraints: %d\n", constraints.getActive()->getLength());
+	// 		printf("[AUX WS STATE] R matrix: Expected to exist for active constraints\n");
+	// 	} else {
+	// 		printf("[AUX WS STATE] Active constraints: 0 (no R matrix needed)\n");
+	// 	}
 		
-		// Check bounds status
-		int nBounds_lower = 0, nBounds_upper = 0, nBounds_fixed = 0, nBounds_free = 0;
-		for ( int i = 0; i < nV; ++i ) {
-			SubjectToStatus st = bounds.getStatus(i);
-			if (st == ST_LOWER) nBounds_lower++;
-			else if (st == ST_UPPER) nBounds_upper++;
-			else if (bounds.getType(i) == ST_EQUALITY) nBounds_fixed++;
-			else if (st == ST_INACTIVE) nBounds_free++;
-		}
-		printf("[AUX WS STATE] Bounds status:\n");
-		printf("  Fixed: %d, Lower: %d, Upper: %d, Free: %d\n",
-		       nBounds_fixed, nBounds_lower, nBounds_upper, nBounds_free);
+	// 	// Check bounds status
+	// 	int nBounds_lower = 0, nBounds_upper = 0, nBounds_fixed = 0, nBounds_free = 0;
+	// 	for ( int i = 0; i < nV; ++i ) {
+	// 		SubjectToStatus st = bounds.getStatus(i);
+	// 		if (st == ST_LOWER) nBounds_lower++;
+	// 		else if (st == ST_UPPER) nBounds_upper++;
+	// 		else if (bounds.getType(i) == ST_EQUALITY) nBounds_fixed++;
+	// 		else if (st == ST_INACTIVE) nBounds_free++;
+	// 	}
+	// 	printf("[AUX WS STATE] Bounds status:\n");
+	// 	printf("  Fixed: %d, Lower: %d, Upper: %d, Free: %d\n",
+	// 	       nBounds_fixed, nBounds_lower, nBounds_upper, nBounds_free);
 		
-		// Check constraints status
-		int nConstr_lower = 0, nConstr_upper = 0, nConstr_inactive = 0;
-		for ( int i = 0; i < nC; ++i ) {
-			SubjectToStatus st = constraints.getStatus(i);
-			if (st == ST_LOWER) nConstr_lower++;
-			else if (st == ST_UPPER) nConstr_upper++;
-			else if (st == ST_INACTIVE) nConstr_inactive++;
-		}
-		printf("[AUX WS STATE] Constraints status:\n");
-		printf("  Lower: %d, Upper: %d, Inactive: %d\n",
-		       nConstr_lower, nConstr_upper, nConstr_inactive);
+	// 	// Check constraints status
+	// 	int nConstr_lower = 0, nConstr_upper = 0, nConstr_inactive = 0;
+	// 	for ( int i = 0; i < nC; ++i ) {
+	// 		SubjectToStatus st = constraints.getStatus(i);
+	// 		if (st == ST_LOWER) nConstr_lower++;
+	// 		else if (st == ST_UPPER) nConstr_upper++;
+	// 		else if (st == ST_INACTIVE) nConstr_inactive++;
+	// 	}
+	// 	printf("[AUX WS STATE] Constraints status:\n");
+	// 	printf("  Lower: %d, Upper: %d, Inactive: %d\n",
+	// 	       nConstr_lower, nConstr_upper, nConstr_inactive);
 		
-		printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
-	}
-	#endif
+	// 	printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
+	// }
+	// #endif
 
 	return SUCCESSFUL_RETURN;
 }
@@ -3125,21 +3074,6 @@ returnValue QProblem::setupAuxiliaryQPsolution(	const real_t* const xOpt, const 
 	int_t i, j;
 	int_t nV = getNV( );
 	int_t nC = getNC( );
-
-	#ifndef __SUPPRESSANYOUTPUT__
-	printf("[SETUP AUX SOL] Called with xOpt=%s, yOpt=%s\n",
-	       xOpt ? "PROVIDED" : "NULL", yOpt ? "PROVIDED" : "NULL");
-	if ( xOpt != 0 ) {
-		printf("[SETUP AUX SOL] xOpt[0:5]: [%.4f, %.4f, %.4f, %.4f, %.4f, %.4f]\n",
-		       xOpt[0], xOpt[1], xOpt[2], xOpt[3], xOpt[4], nV > 5 ? xOpt[5] : 0.0);
-	}
-	if ( yOpt != 0 ) {
-		printf("[SETUP AUX SOL] yOpt[0:3] (bounds): [%.4f, %.4f, %.4f, %.4f]\n",
-		       yOpt[0], yOpt[1], yOpt[2], yOpt[3]);
-		printf("[SETUP AUX SOL] yOpt[nV:nV+3] (constr): [%.4f, %.4f, %.4f, %.4f]\n",
-		       yOpt[nV], yOpt[nV+1], yOpt[nV+2], yOpt[nV+3]);
-	}
-	#endif
 
 	/* Setup primal/dual solution vector for auxiliary initial QP:
 	 * if a null pointer is passed, a zero vector is assigned;
@@ -3176,18 +3110,6 @@ returnValue QProblem::setupAuxiliaryQPsolution(	const real_t* const xOpt, const 
 		if ( yOpt != y )
 			for( i=0; i<nV+nC; ++i )
 				y[i] = yOpt[i];
-		
-		#ifndef __SUPPRESSANYOUTPUT__
-		if ( mpcData.isInitialized == BT_TRUE ) {
-			// Verify that yOpt was copied correctly for last few constraints
-			// For N=20, nx=4: constraints 72-75 (k=18) and 76-79 (k=19)
-			printf("[SETUP AUX SOL] After copying yOpt to y, checking constraints 72-79:\n");
-			printf("  y[nV+72:75]: [%.6f, %.6f, %.6f, %.6f]\n",
-			       y[nV+72], y[nV+73], y[nV+74], y[nV+75]);
-			printf("  y[nV+76:79]: [%.6f, %.6f, %.6f, %.6f]\n",
-			       y[nV+76], y[nV+77], y[nV+78], y[nV+79]);
-		}
-		#endif
 	}
 	else
 	{
@@ -3693,17 +3615,6 @@ returnValue QProblem::addConstraint_checkLI( int_t number )
 		for (i = 0; i < nFR; i++)
 			l2  += Arow[i]*Arow[i];
 
-		#ifndef __SUPPRESSANYOUTPUT__
-		if ( mpcData.isInitialized == BT_TRUE && (number < 4 || number >= nC-4) ) {
-			printf("[LI TEST] Constraint C[%d]: nFR=%d, nZ=%d, nAC=%d, l2=%.6e, epsLITests=%.6e\n",
-			       number, nFR, nZ, nAC, l2, options.epsLITests);
-			if (nFR > 0) {
-				printf("[LI TEST]   Arow[0:3] = [%.6e, %.6e, %.6e, %.6e]\n",
-				       Arow[0], (nFR>1)?Arow[1]:0.0, (nFR>2)?Arow[2]:0.0, (nFR>3)?Arow[3]:0.0);
-			}
-		}
-		#endif
-
 		for( j=0; j<nZ; ++j )
 		{
 			sum = 0.0;
@@ -3715,25 +3626,10 @@ returnValue QProblem::addConstraint_checkLI( int_t number )
 
 			if ( getAbs( sum ) > options.epsLITests*l2 )
 			{
-				#ifndef __SUPPRESSANYOUTPUT__
-				if ( mpcData.isInitialized == BT_TRUE && (number < 4 || number >= nC-4) ) {
-					printf("[LI TEST]   ✓ PASSED at j=%d: |sum|=%.6e > threshold=%.6e\n",
-					       j, getAbs(sum), options.epsLITests*l2);
-				}
-				#endif
 				returnvalue = RET_LINEARLY_INDEPENDENT;
 				break;
 			}
 		}
-
-		#ifndef __SUPPRESSANYOUTPUT__
-		if ( mpcData.isInitialized == BT_TRUE && (number < 4 || number >= nC-4) ) {
-			if (returnvalue != RET_LINEARLY_INDEPENDENT) {
-				printf("[LI TEST]   ✗ FAILED: All |sum| <= threshold=%.6e (checked %d null space vectors)\n",
-				       options.epsLITests*l2, nZ);
-			}
-		}
-		#endif
 
 		delete[] Arow;
 	}
@@ -7292,18 +7188,12 @@ returnValue QProblem::detectMPCStructure()
  */
 returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const double* g, double* lambda_opt )
 {
-    printf("\n[HEAP DEBUG] ========== solveRiccatiLQR CALLED ==========\n");
-    fflush(stdout);
-    
     /* Check if MPC structure is properly initialized */
     if ( mpcData.isInitialized == BT_FALSE )
         return THROWERROR( RET_MPC_SETUP_FAILED );
 
     if ( mpcData.N <= 0 || mpcData.nx <= 0 || mpcData.nu <= 0 )
         return THROWERROR( RET_INVALID_ARGUMENTS );
-    
-    printf("[HEAP DEBUG] MPC structure validated: N=%d, nx=%d, nu=%d\n", mpcData.N, mpcData.nx, mpcData.nu);
-    fflush(stdout);
 
     /* Use class member variables for Riccati recursion - avoid shadowing */
     /* CRITICAL: Need N+1 stages (k=0 to N) for terminal condition */
@@ -7328,14 +7218,6 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
     real_t* v = new real_t[v_size];
     if ( v == 0 )
         return THROWERROR( RET_MEMORY_ALLOCATION_FAILED );
-    
-    printf("\n[HEAP DEBUG] Array allocations:\n");
-    fflush(stdout);
-    printf("  N=%d, nx=%d, nu=%d\n", mpcData.N, mpcData.nx, mpcData.nu);
-    fflush(stdout);
-    printf("  v: address=%p, size=%d elements, %d bytes\n", 
-           (void*)v, v_size, v_size * (int)sizeof(real_t));
-    fflush(stdout);
     
     /* Allocate affine feedback term (only if gradient is provided) */
     /* CRITICAL: Need N stages (k=0 to N-1) for affine feedback */
@@ -7796,14 +7678,6 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
                 if ( g != 0 && k_affine != 0 )
                 {
                     u_opt[k*nu + i] -= k_affine[k*nu + i];  // Standard affine LQR
-                    
-                    #ifndef __SUPPRESSANYOUTPUT__
-                    if (forward_pass_count <= 2 && k < 2 && i == 0) {
-                        printf("[RICCATI FORWARD k=%d] k_affine[%d] = %.4f, u_before = %.4f, u_after = %.4f\n",
-                               k, k*nu + i, k_affine[k*nu + i], 
-                               u_opt[k*nu + i] - k_affine[k*nu + i], u_opt[k*nu + i]);
-                    }
-                    #endif
                 }
             }
 
@@ -7815,13 +7689,6 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
                     x_opt[(k+1)*nx + i] += A_k[i*nx + j] * x_opt[k*nx + j];
                 for ( int j = 0; j < nu; ++j )
                     x_opt[(k+1)*nx + i] += B_k[i*nu + j] * u_opt[k*nu + j];
-            }
-            
-            /* DEBUG: Log first few steps */
-            if (forward_pass_count <= 2 && k < 2) {
-                printf("[RICCATI FORWARD k=%d] x[k]=(%.2f,%.2f), u[k]=%.2f, K[0,0]=%.2f, x[k+1]=(%.2f,%.2f)\n",
-                       k, x_opt[k*nx], x_opt[k*nx+1], u_opt[k*nu], K_k[0],
-                       x_opt[(k+1)*nx], x_opt[(k+1)*nx+1]);
             }
         }
         
@@ -7835,13 +7702,7 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
      * COMPUTE COSTATES: λ[k] = P[k]*x[k] + p[k]
      * ======================================== */
     if ( lambda_opt != 0 && x_opt != 0 )
-    {
-        #ifndef __SUPPRESSANYOUTPUT__
-        printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        printf("[RICCATI COSTATE] Computing costates: λ[k] = P[k]*x[k] + p[k]\n");
-        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        #endif
-        
+    {   
         /* Compute costates for all stages k=0 to N using Riccati formula */
         for ( int k = 0; k < N - 1; ++k )
         {
@@ -7874,405 +7735,13 @@ returnValue QProblem::solveRiccatiLQR( double* x_opt, double* u_opt, const doubl
 					lambda_N_1[i] += Q_k[i*nx + j] * x_next[j];
 			}
 		}
-        
-        // #ifndef __SUPPRESSANYOUTPUT__
-        // printf("[RICCATI COSTATE] lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
-        //        lambda_opt[0], lambda_opt[1], lambda_opt[2], lambda_opt[3]);
-        // printf("[RICCATI COSTATE] lambda[N-1]: [%.4f, %.4f, %.4f, %.4f]\n",
-        //        lambda_opt[(N-1)*nx], lambda_opt[(N-1)*nx+1], lambda_opt[(N-1)*nx+2], lambda_opt[(N-1)*nx+3]);
-        // printf("[RICCATI COSTATE] lambda[N]: [%.4f, %.4f, %.4f, %.4f]\n",
-        //        lambda_opt[N*nx], lambda_opt[N*nx+1], lambda_opt[N*nx+2], lambda_opt[N*nx+3]);
-        
-        // /* ========================================
-        //  * VERIFY: λ[k] satisfies λ[k] = Q*x[k] + g_x[k] + A'*λ[k+1]
-        //  * ======================================== */
-        // if ( g != 0 )
-        // {
-        //     printf("\n[COSTATE VERIFICATION] Checking λ[k] = Q*x[k] + g_x[k] + A'*λ[k+1]\n");
-            
-        //     real_t* A_k = mpcData.A;
-        //     real_t* Q_k = mpcData.Q;
-            
-        //     int num_failures = 0;
-        //     real_t max_residual_all = 0.0;
-        //     int worst_stage = -1;
-            
-        //     /* Check stages k=0 to N-2 (interior stages) */
-        //     for ( int k = 0; k < N-1; ++k )
-        //     {
-        //         real_t* x_k = &x_opt[k * nx];
-        //         real_t* lambda_k = &lambda_opt[k * nx];
-        //         real_t* lambda_next = &lambda_opt[(k+1) * nx];
-        //         const real_t* g_x_k = &g[k * (nx + nu)];
-                
-        //         /* Compute RHS: Q*x[k] + g_x[k] + A'*λ[k+1] */
-        //         real_t lambda_check[4] = {0, 0, 0, 0};
-                
-        //         /* Q*x[k] + g_x[k] */
-        //         for ( int i = 0; i < nx; ++i )
-        //         {
-        //             lambda_check[i] = g_x_k[i];
-        //             for ( int j = 0; j < nx; ++j )
-        //                 lambda_check[i] += Q_k[i*nx + j] * x_k[j];
-        //         }
-                
-        //         /* + A'*λ[k+1] */
-        //         for ( int i = 0; i < nx; ++i )
-        //             for ( int j = 0; j < nx; ++j )
-        //                 lambda_check[i] += A_k[j*nx + i] * lambda_next[j];
-                
-        //         /* Compute residual */
-        //         real_t max_residual = 0.0;
-        //         for ( int i = 0; i < nx; ++i )
-        //         {
-        //             real_t residual = getAbs(lambda_check[i] - lambda_k[i]);
-        //             if ( residual > max_residual ) max_residual = residual;
-        //         }
-                
-        //         if ( max_residual > 1e-6 )
-        //         {
-        //             num_failures++;
-        //             if ( num_failures <= 3 )
-        //             {
-        //                 printf("  ✗ FAIL at k=%d: residual = %.6e\n", k, max_residual);
-        //                 printf("    λ[k] (computed) = [%.4f, %.4f, %.4f, %.4f]\n", 
-        //                        lambda_k[0], lambda_k[1], lambda_k[2], lambda_k[3]);
-        //                 printf("    λ[k] (expected)  = [%.4f, %.4f, %.4f, %.4f]\n", 
-        //                        lambda_check[0], lambda_check[1], lambda_check[2], lambda_check[3]);
-        //             }
-        //         }
-                
-        //         if ( max_residual > max_residual_all )
-        //         {
-
-        //             max_residual_all = max_residual;
-        //             worst_stage = k;
-        //         }
-        //     }
-                        
-        //     printf("\n[COSTATE VERIFICATION SUMMARY]\n");
-        //     printf("  Total stages: %d\n", N);
-        //     printf("  Failures: %d/%d\n", num_failures, N);
-        //     printf("  Max residual: %.6e (at k=%d)\n", max_residual_all, worst_stage);
-        //     if ( num_failures == 0 )
-        //         printf("  ✓ PASS: All costate equations satisfied!\n");
-        //     else
-        //         printf("  ✗ FAIL: %d stages violated costate equation!\n", num_failures);
-        // }
-        
-        // #endif
-    }
-    
-    /* ========================================
-     * KKT CONDITION VERIFICATION
-     * ======================================== */
-    if ( lambda_opt != 0 && g != 0 )
-    {
-        #ifndef __SUPPRESSANYOUTPUT__
-        printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        printf("[KKT VERIFICATION] Checking optimality conditions\n");
-        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        #endif
-        
-        real_t* A_k = mpcData.A;
-        real_t* B_k = mpcData.B;
-        real_t* Q_k = mpcData.Q;
-        real_t* R_k = mpcData.R;
-        
-        int kkt_failures = 0;
-        real_t max_stationarity_residual = 0.0;
-        real_t max_primal_residual = 0.0;
-        int worst_stationarity_stage = -1;
-        int worst_primal_stage = -1;
-        
-        /* ========================================
-         * 1. STATIONARITY: ∇L = H*z + g + A'*λ = 0
-         * ======================================== */
-        #ifndef __SUPPRESSANYOUTPUT__
-        printf("\n[KKT] 1. Stationarity: ∇_x L = Q*x + g_x + A'*λ[k+1] - λ[k] = 0\n");
-        printf("                       ∇_u L = R*u + g_u + B'*λ[k+1] = 0\n");
-        #endif
-        
-        /* Check stages k=0 to N-2 (interior stages) */
-        for ( int k = 0; k < N-1; ++k )
-        {
-            real_t* x_k = &x_opt[k * nx];
-            real_t* u_k = &u_opt[k * nu];
-            real_t* lambda_k = &lambda_opt[k * nx];
-            real_t* lambda_next = &lambda_opt[(k+1) * nx];
-            const real_t* g_x_k = &g[k * (nx + nu)];
-            const real_t* g_u_k = &g[k * (nx + nu) + nx];
-            
-            /* Check state stationarity: ∇_x L = Q*x[k] + g_x[k] + A'*λ[k+1] - λ[k] */
-            real_t grad_x[4] = {0, 0, 0, 0};
-            
-            /* Q*x[k] + g_x[k] */
-            for ( int i = 0; i < nx; ++i )
-            {
-                grad_x[i] = g_x_k[i];
-                for ( int j = 0; j < nx; ++j )
-                    grad_x[i] += Q_k[i*nx + j] * x_k[j];
-            }
-            
-            /* + A'*λ[k+1] */
-            for ( int i = 0; i < nx; ++i )
-                for ( int j = 0; j < nx; ++j )
-                    grad_x[i] += A_k[j*nx + i] * lambda_next[j];
-            
-            /* - λ[k] */
-            for ( int i = 0; i < nx; ++i )
-                grad_x[i] -= lambda_k[i];
-            
-            /* Compute residual */
-            real_t state_residual = 0.0;
-            for ( int i = 0; i < nx; ++i )
-            {
-                real_t res = getAbs(grad_x[i]);
-                if ( res > state_residual ) state_residual = res;
-            }
-            
-            /* Check control stationarity: ∇_u L = R*u[k] + g_u[k] + B'*λ[k+1] */
-            real_t grad_u[2] = {0, 0};
-            
-            /* R*u[k] + g_u[k] */
-            for ( int i = 0; i < nu; ++i )
-            {
-                grad_u[i] = g_u_k[i];
-                for ( int j = 0; j < nu; ++j )
-                    grad_u[i] += R_k[i*nu + j] * u_k[j];
-            }
-            
-            /* + B'*λ[k+1] */
-            for ( int i = 0; i < nu; ++i )
-                for ( int j = 0; j < nx; ++j )
-                    grad_u[i] += B_k[j*nu + i] * lambda_next[j];
-            
-            /* Compute residual */
-            real_t control_residual = 0.0;
-            for ( int i = 0; i < nu; ++i )
-            {
-                real_t res = getAbs(grad_u[i]);
-                if ( res > control_residual ) control_residual = res;
-            }
-            
-            real_t stationarity_residual = (state_residual > control_residual) ? state_residual : control_residual;
-            
-            if ( stationarity_residual > 1e-6 )
-            {
-                kkt_failures++;
-                if ( kkt_failures <= 3 )
-                {
-                    printf("  ✗ FAIL at k=%d: stationarity residual = %.6e\n", k, stationarity_residual);
-                    printf("    ∇_x L = [%.4e, %.4e, %.4e, %.4e]\n", 
-                           grad_x[0], grad_x[1], grad_x[2], grad_x[3]);
-                    printf("    ∇_u L = [%.4e, %.4e]\n", grad_u[0], grad_u[1]);
-                }
-            }
-            
-            if ( stationarity_residual > max_stationarity_residual )
-            {
-                max_stationarity_residual = stationarity_residual;
-                worst_stationarity_stage = k;
-            }
-        }
-        
-        /* Check stage k=N-1 separately (uses terminal gradient instead of lambda[N]) */
-        {
-            int k = N-1;
-            real_t* x_k = &x_opt[k * nx];
-            real_t* u_k = &u_opt[k * nu];
-            real_t* x_next = &x_opt[N * nx];
-            real_t* lambda_k = &lambda_opt[k * nx];
-            const real_t* g_x_k = &g[k * (nx + nu)];
-            const real_t* g_u_k = &g[k * (nx + nu) + nx];
-            const real_t* g_x_terminal = &g[N * (nx + nu)];
-            
-            /* Check state stationarity: ∇_x L = Q*x[k] + g_x[k] + A'*(Q*x[N] + g_x[N]) - λ[k] */
-            real_t grad_x[4] = {0, 0, 0, 0};
-            
-            /* Q*x[k] + g_x[k] */
-            for ( int i = 0; i < nx; ++i )
-            {
-                grad_x[i] = g_x_k[i];
-                for ( int j = 0; j < nx; ++j )
-                    grad_x[i] += Q_k[i*nx + j] * x_k[j];
-            }
-            
-            /* + A'*(Q*x[N] + g_x[N]) - terminal gradient instead of lambda[N] */
-            real_t terminal_grad[4] = {0, 0, 0, 0};
-            for ( int i = 0; i < nx; ++i )
-            {
-                terminal_grad[i] = g_x_terminal[i];
-                for ( int j = 0; j < nx; ++j )
-                    terminal_grad[i] += Q_k[i*nx + j] * x_next[j];
-            }
-            
-            for ( int i = 0; i < nx; ++i )
-                for ( int j = 0; j < nx; ++j )
-                    grad_x[i] += A_k[j*nx + i] * terminal_grad[j];
-            
-            /* - λ[k] */
-            for ( int i = 0; i < nx; ++i )
-                grad_x[i] -= lambda_k[i];
-            
-            /* Compute residual */
-            real_t state_residual = 0.0;
-            for ( int i = 0; i < nx; ++i )
-            {
-                real_t res = getAbs(grad_x[i]);
-                if ( res > state_residual ) state_residual = res;
-            }
-            
-            /* Check control stationarity: ∇_u L = R*u[k] + g_u[k] + B'*(Q*x[N] + g_x[N]) */
-            real_t grad_u[2] = {0, 0};
-            
-            /* R*u[k] + g_u[k] */
-            for ( int i = 0; i < nu; ++i )
-            {
-                grad_u[i] = g_u_k[i];
-                for ( int j = 0; j < nu; ++j )
-                    grad_u[i] += R_k[i*nu + j] * u_k[j];
-            }
-            
-            /* + B'*(Q*x[N] + g_x[N]) */
-            for ( int i = 0; i < nu; ++i )
-                for ( int j = 0; j < nx; ++j )
-                    grad_u[i] += B_k[j*nu + i] * terminal_grad[j];
-            
-            /* Compute residual */
-            real_t control_residual = 0.0;
-            for ( int i = 0; i < nu; ++i )
-            {
-                real_t res = getAbs(grad_u[i]);
-                if ( res > control_residual ) control_residual = res;
-            }
-            
-            real_t stationarity_residual = (state_residual > control_residual) ? state_residual : control_residual;
-            
-            if ( stationarity_residual > 1e-6 )
-            {
-                kkt_failures++;
-                if ( kkt_failures <= 3 )
-                {
-                    printf("  ✗ FAIL at k=%d: stationarity residual = %.6e\n", k, stationarity_residual);
-                    printf("    ∇_x L = [%.4e, %.4e, %.4e, %.4e]\n", 
-                           grad_x[0], grad_x[1], grad_x[2], grad_x[3]);
-                    printf("    ∇_u L = [%.4e, %.4e]\n", grad_u[0], grad_u[1]);
-                }
-            }
-            
-            if ( stationarity_residual > max_stationarity_residual )
-            {
-                max_stationarity_residual = stationarity_residual;
-                worst_stationarity_stage = k;
-            }
-        }
-        
-        /* NOTE: No terminal stationarity check for k=N
-         * In unconstrained LQR, there is no terminal constraint, only a terminal cost.
-         * Therefore, λ[N] = ∂φ/∂x[N] = Q*x[N] + g_x[N] is the terminal cost gradient,
-         * not a constraint dual variable. The stationarity condition at k=N is:
-         *   ∇_x φ(x[N]) = Q*x[N] + g_x[N]
-         * which is satisfied by construction (λ[N] = P[N]*x[N] + p[N] where P[N]=Q).
-         */
-        
-        /* ========================================
-         * 2. PRIMAL FEASIBILITY: x[k+1] = A*x[k] + B*u[k]
-         * ======================================== */
-        #ifndef __SUPPRESSANYOUTPUT__
-        printf("\n[KKT] 2. Primal Feasibility: x[k+1] = A*x[k] + B*u[k]\n");
-        #endif
-        
-        int primal_failures = 0;
-        for ( int k = 0; k < N; ++k )
-        {
-            real_t* x_k = &x_opt[k * nx];
-            real_t* u_k = &u_opt[k * nu];
-            real_t* x_next = &x_opt[(k+1) * nx];
-            
-            /* Compute A*x[k] + B*u[k] */
-            real_t x_predicted[4] = {0, 0, 0, 0};
-            
-            for ( int i = 0; i < nx; ++i )
-            {
-                for ( int j = 0; j < nx; ++j )
-                    x_predicted[i] += A_k[i*nx + j] * x_k[j];
-                for ( int j = 0; j < nu; ++j )
-                    x_predicted[i] += B_k[i*nu + j] * u_k[j];
-            }
-            
-            /* Compute residual: ||x[k+1] - (A*x[k] + B*u[k])|| */
-            real_t primal_residual = 0.0;
-            for ( int i = 0; i < nx; ++i )
-            {
-                real_t res = getAbs(x_next[i] - x_predicted[i]);
-                if ( res > primal_residual ) primal_residual = res;
-            }
-            
-            if ( primal_residual > 1e-6 )
-            {
-                primal_failures++;
-                if ( primal_failures <= 3 )
-                {
-                    printf("  ✗ FAIL at k=%d: primal residual = %.6e\n", k, primal_residual);
-                    printf("    x[k+1] (actual)    = [%.4f, %.4f, %.4f, %.4f]\n", 
-                           x_next[0], x_next[1], x_next[2], x_next[3]);
-                    printf("    A*x[k] + B*u[k]    = [%.4f, %.4f, %.4f, %.4f]\n", 
-                           x_predicted[0], x_predicted[1], x_predicted[2], x_predicted[3]);
-                }
-            }
-            
-            if ( primal_residual > max_primal_residual )
-            {
-                max_primal_residual = primal_residual;
-                worst_primal_stage = k;
-            }
-        }
-        
-        /* ========================================
-         * KKT SUMMARY
-         * ======================================== */
-        #ifndef __SUPPRESSANYOUTPUT__
-        printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        printf("[KKT SUMMARY]\n");
-        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        printf("  1. Stationarity:\n");
-        printf("     Failures: %d/%d stages\n", kkt_failures, N+1);
-        printf("     Max residual: %.6e (at k=%d)\n", max_stationarity_residual, worst_stationarity_stage);
-        if ( kkt_failures == 0 )
-            printf("     ✓ PASS: All stationarity conditions satisfied!\n");
-        else
-            printf("     ✗ FAIL: %d stages violated stationarity!\n", kkt_failures);
-        
-        printf("\n  2. Primal Feasibility:\n");
-        printf("     Failures: %d/%d stages\n", primal_failures, N);
-        printf("     Max residual: %.6e (at k=%d)\n", max_primal_residual, worst_primal_stage);
-        if ( primal_failures == 0 )
-            printf("     ✓ PASS: All dynamics constraints satisfied!\n");
-        else
-            printf("     ✗ FAIL: %d stages violated dynamics!\n", primal_failures);
-        
-        printf("\n  Overall KKT Status: ");
-        if ( kkt_failures == 0 && primal_failures == 0 )
-            printf("✓ OPTIMAL SOLUTION\n");
-        else
-            printf("✗ KKT CONDITIONS VIOLATED\n");
-        printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
-        #endif
     }
     
 	delete[] v;
 	if (k_affine != 0)
 		delete[] k_affine;
 	if (Sinv_all != 0)
-		delete[] Sinv_all;
-    
-    // NOTE: v, k_affine, and Sinv_all are NOT deleted to avoid heap corruption crashes
-    // delete[] v;           // DISABLED - causes crash due to heap corruption
-    // delete[] k_affine;    // DISABLED - causes crash due to heap corruption  
-    // delete[] Sinv_all;    // DISABLED - causes crash due to heap corruption
-    
-       
+		delete[] Sinv_all;   
     return SUCCESSFUL_RETURN;
 }
 

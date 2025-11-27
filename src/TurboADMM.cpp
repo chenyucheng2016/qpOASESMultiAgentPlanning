@@ -9,6 +9,9 @@
 #include <qpOASES/TurboADMM.hpp>
 #include <cstring>
 #include <cmath>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 BEGIN_NAMESPACE_QPOASES
 
@@ -1062,9 +1065,7 @@ returnValue TurboADMM::setupAgentSolvers()
         // ========================================
         // PHASE 1: Build Q_aug for MPC Structure
         // ========================================
-        // Q_aug must match EXACTLY the Hessian diagonal:
-        //   Q_aug[j,j] = stage_weight * Q[j,j] + ρ * num_neighbors (for position states)
-        //   Q_aug[j,j] = stage_weight * Q[j,j]                     (for velocity states)
+
         
         agent_Q_aug_[i] = new real_t[agent.nx * agent.nx];
         memset(agent_Q_aug_[i], 0, agent.nx * agent.nx * sizeof(real_t));
@@ -1081,14 +1082,6 @@ returnValue TurboADMM::setupAgentSolvers()
             for (int j = 0; j < 2 && j < agent.nx; ++j) {
                 agent_Q_aug_[i][j * agent.nx + j] += rho_aug;
             }
-        }
-        
-        // Log Q_aug values for validation
-        printf("[MPC-AWARE] Agent %d: Q_aug constructed\n", i);
-        printf("  Q_aug[0,0] = %.6f (position x, with ADMM aug)\n", agent_Q_aug_[i][0]);
-        printf("  Q_aug[1,1] = %.6f (position y, with ADMM aug)\n", agent_Q_aug_[i][agent.nx + 1]);
-        if (agent.nx > 2) {
-            printf("  Q_aug[2,2] = %.6f (velocity, no ADMM aug)\n", agent_Q_aug_[i][2*agent.nx + 2]);
         }
         
         // ========================================
@@ -1259,6 +1252,26 @@ returnValue TurboADMM::solveColdStart(
         stats_.admm_iterations = admm_iter;
         
         // Step 2.1: Solve agent subproblems with ADMM augmentation
+        // Prepare for parallel execution: track errors and QP iterations
+        std::vector<returnValue> solve_errors(n_agents_, SUCCESSFUL_RETURN);
+        int total_qp_iters = 0;
+        
+        // Parallelize agent subproblem solves with OpenMP
+        // Each agent's QP is independent, so we can solve them in parallel
+        // CRITICAL: Limit threads to number of agents to avoid oversubscription
+        #ifdef _OPENMP
+        int max_threads = omp_get_max_threads();
+        int optimal_threads = (n_agents_ < max_threads) ? n_agents_ : max_threads;
+        int actual_threads = optimal_threads / 2 + 1;  // Use half for better performance
+        if (actual_threads < 1) actual_threads = 1;  // Ensure at least 1 thread
+        omp_set_num_threads(actual_threads);
+        if (admm_iter == 0) {
+            printf("[OpenMP] Using %d threads for %d agents (max available: %d)\n", 
+                   actual_threads, n_agents_, max_threads);
+        }
+        #endif
+        
+        #pragma omp parallel for schedule(dynamic) reduction(+:total_qp_iters)
         for (int i = 0; i < n_agents_; ++i) {
             AgentData& agent = agents_[i];
             
@@ -1280,7 +1293,8 @@ returnValue TurboADMM::solveColdStart(
             ret = computeTrackingGradient(i, g);
             if (ret != SUCCESSFUL_RETURN) {
                 delete[] g;
-                return ret;
+                solve_errors[i] = ret;
+                continue;  // Skip this agent and continue with others
             }
             
             // Add ADMM collision coupling terms: g_ADMM = g + Σⱼ∈N(i) [ρ*vᵢⱼ - λᵢⱼ]
@@ -1513,29 +1527,11 @@ returnValue TurboADMM::solveColdStart(
                 memset(y_riccati, 0, (agent.nV + nConstraints_total) * sizeof(real_t));
                 
                 if (ret_riccati == SUCCESSFUL_RETURN) {
-                    // Map Riccati costates to dynamics constraint duals
-                    // CRITICAL MAPPING:
-                    // - We have N dynamics constraints: x[k+1] = A*x[k] + B*u[k] for k=0..N-1
-                    // - Riccati produces N+1 costates: λ[0], λ[1], ..., λ[N]
-                    // - Constraint k (x[k+1] = ...) has dual = λ[k+1]
-                    // - So we map λ[1] through λ[N] to constraints 0 through N-1
-                    // - λ[0] is NOT used (no constraint for initial state x[0])
                     
                     int num_dynamics_constraints = agent.nC;  // Should be N*nx
                     printf("[DEBUG] Agent %d: num_dynamics_constraints=%d, expected=N*nx=%d\n",
                            i, num_dynamics_constraints, agent.N*agent.nx);
                     
-                    // Map costates λ[0] through λ[N-1] to constraints 0 through N-1
-                    // 
-                    // Constraint k: -x[k+1] + A*x[k] + B*u[k] = 0
-                    // Lagrangian: L = objective + Σ lambda[k]' * (-x[k+1] + A*x[k] + B*u[k])
-                    // 
-                    // KKT conditions show that constraint k has dual variable lambda[k]:
-                    // - ∂L/∂u[k] = R*u[k] + B'*lambda[k] + g_u[k] = 0
-                    // - ∂L/∂x[k] = Q*x[k] - lambda[k-1] + A'*lambda[k] + g_x[k] = 0  (for k>0)
-                    // - ∂L/∂x[N] = Q*x[N] - lambda[N-1] + g_x[N] = 0  (lambda[N] = 0)
-                    //
-                    // Therefore: Constraint k ← lambda[k] (NOT lambda[k+1])
                     for (int k = 0; k < agent.N; ++k) {  // k = 0 to N-1 (N constraints)
                         for (int j = 0; j < agent.nx; ++j) {
                             // Constraint k corresponds to lambda[k]
@@ -1543,62 +1539,6 @@ returnValue TurboADMM::solveColdStart(
                             y_riccati[agent.nV + k*agent.nx + j] = -lambda_riccati[k*agent.nx + j];
                         }
                     }
-                    
-                    // VERIFY: Check that the values were actually set correctly
-                    printf("[DEBUG] Agent %d: VERIFICATION - Checking y_riccati right after mapping:\n", i);
-                    printf("[DEBUG]   y_riccati[nV+72:75] = [%.6f, %.6f, %.6f, %.6f]\n",
-                           y_riccati[agent.nV+72], y_riccati[agent.nV+73], 
-                           y_riccati[agent.nV+74], y_riccati[agent.nV+75]);
-                    printf("[DEBUG]   y_riccati[nV+76:79] = [%.6f, %.6f, %.6f, %.6f]\n",
-                           y_riccati[agent.nV+76], y_riccati[agent.nV+77], 
-                           y_riccati[agent.nV+78], y_riccati[agent.nV+79]);
-                    printf("[DEBUG]   Expected from -lambda[N-2]: [%.6f, %.6f, %.6f, %.6f]\n",
-                           -lambda_riccati[(agent.N-2)*agent.nx], -lambda_riccati[(agent.N-2)*agent.nx+1],
-                           -lambda_riccati[(agent.N-2)*agent.nx+2], -lambda_riccati[(agent.N-2)*agent.nx+3]);
-                    printf("[DEBUG]   Expected from -lambda[N-1]: [%.6f, %.6f, %.6f, %.6f]\n",
-                           -lambda_riccati[(agent.N-1)*agent.nx], -lambda_riccati[(agent.N-1)*agent.nx+1],
-                           -lambda_riccati[(agent.N-1)*agent.nx+2], -lambda_riccati[(agent.N-1)*agent.nx+3]);
-                    
-                    printf("[DEBUG] Agent %d: Mapped %d costates (λ[0] through λ[N-1]) to %d constraint duals\n", 
-                           i, agent.N * agent.nx, num_dynamics_constraints);
-                    printf("[DEBUG]   lambda[0]: [%.4f, %.4f, %.4f, %.4f]\n",
-                           lambda_riccati[0], lambda_riccati[1], 
-                           lambda_riccati[2], lambda_riccati[3]);
-                    printf("[DEBUG]   y_riccati[nV:nV+3]: [%.4f, %.4f, %.4f, %.4f]\n",
-                           y_riccati[agent.nV], y_riccati[agent.nV+1], y_riccati[agent.nV+2], y_riccati[agent.nV+3]);
-                    
-                    // Print last few costates for debugging gradient mismatch
-                    printf("[DEBUG] Agent %d: Last few Riccati costates:\n", i);
-                    printf("[DEBUG]   lambda[N-2] (idx %d): [%.6f, %.6f, %.6f, %.6f]\n",
-                           (agent.N-2)*agent.nx,
-                           lambda_riccati[(agent.N-2)*agent.nx], lambda_riccati[(agent.N-2)*agent.nx+1],
-                           lambda_riccati[(agent.N-2)*agent.nx+2], lambda_riccati[(agent.N-2)*agent.nx+3]);
-                    printf("[DEBUG]   lambda[N-1] (idx %d): [%.6f, %.6f, %.6f, %.6f]\n",
-                           (agent.N-1)*agent.nx,
-                           lambda_riccati[(agent.N-1)*agent.nx], lambda_riccati[(agent.N-1)*agent.nx+1],
-                           lambda_riccati[(agent.N-1)*agent.nx+2], lambda_riccati[(agent.N-1)*agent.nx+3]);
-                    printf("[DEBUG]   lambda[N] (idx %d): [%.6f, %.6f, %.6f, %.6f] (should be ZERO or unused)\n",
-                           agent.N*agent.nx,
-                           lambda_riccati[agent.N*agent.nx], lambda_riccati[agent.N*agent.nx+1],
-                           lambda_riccati[agent.N*agent.nx+2], lambda_riccati[agent.N*agent.nx+3]);
-                    
-                    // Print how they map to constraint duals
-                    // Constraint k (k=0..N-1) now maps to lambda[k] (NOT lambda[k+1])
-                    int last_constr_start = (agent.N - 1) * agent.nx;        // Should be 76 for N=20, nx=4
-                    int second_last_constr_start = (agent.N - 2) * agent.nx; // Should be 72 for N=20, nx=4
-                    printf("[DEBUG] Agent %d: Mapped to constraint duals:\n", i);
-                    printf("[DEBUG]   Constraints %d-%d (k=%d): yC=[%.6f, %.6f, %.6f, %.6f] (from -lambda[N-2])\n",
-                           second_last_constr_start, second_last_constr_start + agent.nx - 1, agent.N - 2,
-                           y_riccati[agent.nV + second_last_constr_start],
-                           y_riccati[agent.nV + second_last_constr_start + 1],
-                           y_riccati[agent.nV + second_last_constr_start + 2],
-                           y_riccati[agent.nV + second_last_constr_start + 3]);
-                    printf("[DEBUG]   Constraints %d-%d (k=%d): yC=[%.6f, %.6f, %.6f, %.6f] (from -lambda[N-1])\n",
-                           last_constr_start, last_constr_start + agent.nx - 1, agent.N - 1,
-                           y_riccati[agent.nV + last_constr_start],
-                           y_riccati[agent.nV + last_constr_start + 1],
-                           y_riccati[agent.nV + last_constr_start + 2],
-                           y_riccati[agent.nV + last_constr_start + 3]);
                 }
                 
                 ret = agent_solvers_[i]->init(
@@ -1607,91 +1547,84 @@ returnValue TurboADMM::solveColdStart(
                     lbA_combined, ubA_combined,
                     nWSR,
                     nullptr,     // cputime
-                    z_riccati,   // x0: Riccati primal solution
-                    y_riccati,   // y0: Riccati dual solution (costates)
+                    nullptr,// z_riccati,   // x0: Riccati primal solution
+                    nullptr,//y_riccati,   // y0: Riccati dual solution (costates)
                     nullptr,     // guessedBounds
                     nullptr      // guessedConstraints
                 );
                 
-                // ========================================
-                // Compare Riccati solution with final QP solution
-                // ========================================
-                printf("\n================================================================================\n");
-                printf("[TRAJECTORY COMPARISON] Agent %d - Riccati vs Final QP Solution\n", i);
-                printf("================================================================================\n");
+                // // ========================================
+                // // Compare Riccati solution with final QP solution
+                // // ========================================
+                // printf("\n================================================================================\n");
+                // printf("[TRAJECTORY COMPARISON] Agent %d - Riccati vs Final QP Solution\n", i);
+                // printf("================================================================================\n");
                 
                 // Get final QP solution from qpOASES
                 real_t* z_final = new real_t[agent.nV];
                 agent_solvers_[i]->getPrimalSolution(z_final);
                 
-                // Compare trajectories stage by stage
-                printf("Stage | Riccati Solution (x, u)           | Final QP Solution (x, u)          | Difference\n");
-                printf("------+-----------------------------------+-----------------------------------+-----------\n");
+                // // Compare trajectories stage by stage
+                // printf("Stage | Riccati Solution (x, u)           | Final QP Solution (x, u)          | Difference\n");
+                // printf("------+-----------------------------------+-----------------------------------+-----------\n");
                 
-                int idx_traj = 0;
-                real_t max_state_diff = 0.0;
-                real_t max_control_diff = 0.0;
+                // int idx_traj = 0;
+                // real_t max_state_diff = 0.0;
+                // real_t max_control_diff = 0.0;
                 
-                for (int k = 0; k <= agent.N; ++k) {
-                    // State comparison
-                    printf("  %2d  | x: [", k);
-                    for (int j = 0; j < agent.nx; ++j) {
-                        printf("%7.3f", z_riccati[idx_traj + j]);
-                        if (j < agent.nx - 1) printf(", ");
-                    }
-                    printf("] | x: [");
-                    for (int j = 0; j < agent.nx; ++j) {
-                        printf("%7.3f", z_final[idx_traj + j]);
-                        if (j < agent.nx - 1) printf(", ");
-                    }
-                    printf("] | ");
+                // for (int k = 0; k <= agent.N; ++k) {
+                //     // State comparison
+                //     printf("  %2d  | x: [", k);
+                //     for (int j = 0; j < agent.nx; ++j) {
+                //         printf("%7.3f", z_riccati[idx_traj + j]);
+                //         if (j < agent.nx - 1) printf(", ");
+                //     }
+                //     printf("] | x: [");
+                //     for (int j = 0; j < agent.nx; ++j) {
+                //         printf("%7.3f", z_final[idx_traj + j]);
+                //         if (j < agent.nx - 1) printf(", ");
+                //     }
+                //     printf("] | ");
                     
-                    // Compute state difference
-                    real_t state_diff = 0.0;
-                    for (int j = 0; j < agent.nx; ++j) {
-                        real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
-                        state_diff += diff * diff;
-                    }
-                    state_diff = sqrt(state_diff);
-                    if (state_diff > max_state_diff) max_state_diff = state_diff;
-                    printf("%.4f\n", state_diff);
+                //     // Compute state difference
+                //     real_t state_diff = 0.0;
+                //     for (int j = 0; j < agent.nx; ++j) {
+                //         real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
+                //         state_diff += diff * diff;
+                //     }
+                //     state_diff = sqrt(state_diff);
+                //     if (state_diff > max_state_diff) max_state_diff = state_diff;
+                //     printf("%.4f\n", state_diff);
                     
-                    idx_traj += agent.nx;
+                //     idx_traj += agent.nx;
                     
-                    // Control comparison (only for k < N)
-                    if (k < agent.N) {
-                        printf("      | u: [");
-                        for (int j = 0; j < agent.nu; ++j) {
-                            printf("%7.3f", z_riccati[idx_traj + j]);
-                            if (j < agent.nu - 1) printf(", ");
-                        }
-                        printf("] | u: [");
-                        for (int j = 0; j < agent.nu; ++j) {
-                            printf("%7.3f", z_final[idx_traj + j]);
-                            if (j < agent.nu - 1) printf(", ");
-                        }
-                        printf("] | ");
+                //     // Control comparison (only for k < N)
+                //     if (k < agent.N) {
+                //         printf("      | u: [");
+                //         for (int j = 0; j < agent.nu; ++j) {
+                //             printf("%7.3f", z_riccati[idx_traj + j]);
+                //             if (j < agent.nu - 1) printf(", ");
+                //         }
+                //         printf("] | u: [");
+                //         for (int j = 0; j < agent.nu; ++j) {
+                //             printf("%7.3f", z_final[idx_traj + j]);
+                //             if (j < agent.nu - 1) printf(", ");
+                //         }
+                //         printf("] | ");
                         
-                        // Compute control difference
-                        real_t control_diff = 0.0;
-                        for (int j = 0; j < agent.nu; ++j) {
-                            real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
-                            control_diff += diff * diff;
-                        }
-                        control_diff = sqrt(control_diff);
-                        if (control_diff > max_control_diff) max_control_diff = control_diff;
-                        printf("%.4f\n", control_diff);
+                //         // Compute control difference
+                //         real_t control_diff = 0.0;
+                //         for (int j = 0; j < agent.nu; ++j) {
+                //             real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
+                //             control_diff += diff * diff;
+                //         }
+                //         control_diff = sqrt(control_diff);
+                //         if (control_diff > max_control_diff) max_control_diff = control_diff;
+                //         printf("%.4f\n", control_diff);
                         
-                        idx_traj += agent.nu;
-                    }
-                }
-                
-                printf("--------------------------------------------------------------------------------\n");
-                printf("Summary:\n");
-                printf("  Max state difference:   %.6f\n", max_state_diff);
-                printf("  Max control difference: %.6f\n", max_control_diff);
-                printf("  QP iterations: %d\n", nWSR);
-                printf("================================================================================\n\n");
+                //         idx_traj += agent.nu;
+                //     }
+                // }
                 
                 delete[] z_final;
                 
@@ -1700,8 +1633,6 @@ returnValue TurboADMM::solveColdStart(
                 delete[] u_riccati;
                 delete[] lambda_riccati;
                 delete[] y_riccati;
-                printf("[QP ITER] Agent %d, ADMM iter %d, init() with Riccati: %d iterations\n", i, admm_iter, nWSR);
-                printf("[QP RETURN CODE] Agent %d: init() returned code %d (SUCCESSFUL_RETURN=%d, RET_QP_SOLVED=%d)\n", i, ret, SUCCESSFUL_RETURN, RET_QP_SOLVED);
                 
                 // Clean up Riccati solution
                 delete[] z_riccati;
@@ -1721,7 +1652,6 @@ returnValue TurboADMM::solveColdStart(
             } else {
                 // Hotstart: Only gradient and bounds change between ADMM iterations
                 // Hessian H and constraint matrix A remain constant (tracking cost only)
-                printf("[DEBUG] Agent %d: Hotstart QP (admm_iter=%d)\n", i, admm_iter);
                 
                 // FIX INITIAL STATE: Same as cold start
                 real_t* lb_local = new real_t[agent.nV];
@@ -1780,8 +1710,7 @@ returnValue TurboADMM::solveColdStart(
                     lbA_combined, ubA_combined,
                     nWSR
                 );
-                printf("[QP ITER] Agent %d, ADMM iter %d, hotstart(): %d iterations\n", i, admm_iter, nWSR);
-                
+
                 if (ret != SUCCESSFUL_RETURN) {
                     printf("[ERROR] Agent %d hotstart failed with code %d\n", i, ret);
                     printf("  Expected: nV=%d, nC=%d\n", agent.nV, nConstraints);
@@ -1800,27 +1729,31 @@ returnValue TurboADMM::solveColdStart(
             // Check if QP solve was successful
             // qpOASES returns SUCCESSFUL_RETURN (0) or RET_QP_SOLVED (36) for successful solves
             if (ret != SUCCESSFUL_RETURN && ret != RET_QP_SOLVED) {
-                printf("[ERROR] Agent %d QP solve failed with code %d\n", i, ret);
+                // Store error for handling after parallel region
+                // Cannot return inside parallel region - undefined behavior in OpenMP
+                solve_errors[i] = ret;
+            } else {
+                // Extract solution only if solve was successful
+                agent_solvers_[i]->getPrimalSolution(z_local_[i]);
+            }
+            
+            // Accumulate QP iterations using reduction (thread-safe)
+            total_qp_iters += nWSR;
+                
+        }  // End of parallel region
+        
+        // Post-parallel processing: Update stats and check for errors
+        stats_.total_qp_iterations += total_qp_iters;
+        
+        // Check if any agent QP solve failed
+        for (int i = 0; i < n_agents_; ++i) {
+            if (solve_errors[i] != SUCCESSFUL_RETURN) {
+                printf("[ERROR] Agent %d QP solve failed with code %d\n", i, solve_errors[i]);
                 stats_.converged = BT_FALSE;
                 if (converged_out)
                     *converged_out = BT_FALSE;
-                return ret;
+                return solve_errors[i];
             }
-            
-            // DIAGNOSTIC: Check what QProblem thinks the solution is
-            if (i == 0 && admm_iter == 1) {
-                printf("\n[BEFORE getPrimalSolution] Agent 0, admm_iter=1:\n");
-                printf("  Current z_local[0] terminal: (%.2f, %.2f)\n",
-                       z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 0],
-                       z_local_[0][agents_[0].N * (agents_[0].nx + agents_[0].nu) + 1]);
-            }
-            
-            // Extract solution
-            agent_solvers_[i]->getPrimalSolution(z_local_[i]);
-
-            
-            stats_.total_qp_iterations += nWSR;
-                
         }
         
         // Step 2.2: Project onto collision-free set
@@ -1842,12 +1775,6 @@ returnValue TurboADMM::solveColdStart(
         stats_.admm_iterations = admm_iter + 1;
         stats_.primal_residual = r_primal;
         stats_.dual_residual = r_dual;
-        
-        // Debug output every 10 iterations
-        if ((admm_iter + 1) % 10 == 0) {
-            printf("[DEBUG] ADMM iter %d: r_primal=%.6f, r_dual=%.6f, QP iters=%d\n",
-                   admm_iter + 1, r_primal, r_dual, stats_.total_qp_iterations);
-        }
         
         if (converged == BT_TRUE) {
             stats_.converged = BT_TRUE;
@@ -1905,28 +1832,10 @@ returnValue TurboADMM::computeTrackingGradient(int agent_id, real_t* g_out)
     
     // Terminal state x_N (50% weight, same as all stages)
     real_t terminal_weight = 0.5;
-    
-    #ifndef __SUPPRESSANYOUTPUT__
-    printf("[GRADIENT DEBUG] Agent %d Terminal State:\n", agent_id);
-    printf("  x_ref[N] = (%.2f, %.2f, %.2f, %.2f)\n",
-           agent.x_ref[agent.N * agent.nx + 0],
-           agent.x_ref[agent.N * agent.nx + 1],
-           agent.x_ref[agent.N * agent.nx + 2],
-           agent.x_ref[agent.N * agent.nx + 3]);
-    printf("  Q_diag = (%.2f, %.2f, %.2f, %.2f)\n",
-           agent.Q_diag[0], agent.Q_diag[1], agent.Q_diag[2], agent.Q_diag[3]);
-    #endif
-    
+
     for (int i = 0; i < agent.nx; ++i) {
         real_t diff = 0.0 - agent.x_ref[agent.N * agent.nx + i];
         g_out[idx] = terminal_weight * agent.Q_diag[i] * diff;
-        
-        #ifndef __SUPPRESSANYOUTPUT__
-        if (i < 4) {
-            printf("  g[N][%d] = %.2f * %.2f * (0 - %.2f) = %.4f\n",
-                   i, terminal_weight, agent.Q_diag[i], agent.x_ref[agent.N * agent.nx + i], g_out[idx]);
-        }
-        #endif
         
         idx++;
     }

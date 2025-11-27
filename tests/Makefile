@@ -4,9 +4,9 @@
 
 # Compiler settings
 CXX = g++
-CXXFLAGS = -g -O2 -Wall -std=c++11 -fno-omit-frame-pointer
+CXXFLAGS = -g -O2 -Wall -std=c++11 -fno-omit-frame-pointer -fopenmp -Wno-format-truncation -D__SUPPRESSANYOUTPUT__
 INCLUDES = -I../include -I.
-LDFLAGS = -L../bin -lqpOASES -lm
+LDFLAGS = -L../bin -lqpOASES -lm -fopenmp
 
 # Directories
 BINDIR = bin

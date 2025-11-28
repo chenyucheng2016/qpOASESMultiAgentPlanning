@@ -1,24 +1,16 @@
 # TurboADMM
 ### Riccati-Accelerated Distributed Multi-Agent Planning
 
-> Real-time trajectory optimization for multi-agent systems achieving **5.4× speedup** over centralized methods
+> Real-time trajectory optimization for multi-agent systems achieving over **5x speedup** over OSQP based centralized methods
 
 [![C++](https://img.shields.io/badge/C++-17-blue.svg)](https://isocpp.org/)
 [![OpenMP](https://img.shields.io/badge/OpenMP-Parallel-green.svg)](https://www.openmp.org/)
 [![qpOASES](https://img.shields.io/badge/qpOASES-MPC--Aware-orange.svg)](https://github.com/coin-or/qpOASES)
 
 ---
-
-## 🚀 Key Results
-
-- **70-95% reduction** in QP iterations through Riccati primal-dual warm start
-- **5.4× faster** than centralized OSQP for 6-agent collision avoidance (16ms vs 88ms)
-- **10-60 Hz** real-time control frequency for complex multi-agent scenarios
-- **Scales naturally** with number of agents through distributed ADMM + OpenMP parallelization
-
 ## What is TurboADMM?
 
-TurboADMM is a high-performance trajectory optimization engine designed for **real-time multi-agent control**. Instead of solving one massive centralized optimization problem, each agent solves its own small problem in parallel, coordinated through the Alternating Direction Method of Multipliers (ADMM).
+TurboADMM is a high-performance trajectory optimization engine designed for **real-time multi-agent control**. Built on top of **qpOASES** (a parametric active-set QP solver), it leverages MPC-aware hotstart and distributed optimization. Instead of solving one massive centralized optimization problem, each agent solves its own small problem in parallel, coordinated through the Alternating Direction Method of Multipliers (ADMM).
 
 **Key Features:**
 - **MPC-Aware QP Solving:** Exploits Model Predictive Control structure using Riccati recursion
@@ -26,20 +18,7 @@ TurboADMM is a high-performance trajectory optimization engine designed for **re
 - **OpenMP Parallelization:** Automatic multi-threading for agent subproblems
 - **Embeddable Engine:** Designed to be integrated into larger planning systems
 
-
-## Why TurboADMM?
-
-Rather than a full planner, TurboADMM provides a **fast trajectory optimization engine** that can be embedded inside larger planning systems. Built on qpOASES, it exploits the hotstart mechanism to reuse KKT factorizations across iterations.
-
-**Advantages over centralized approaches:**
-- **Scalability:** Distributed ADMM scales better than monolithic Schur-complement solves
-- **Parallelization:** Agent subproblems solved simultaneously on multi-core CPUs
-- **Modularity:** Easy to add/remove agents or change dynamics
-- **Robustness:** Failure of one agent doesn't crash the entire system
-
 ## Methodology
-
-This work achieves real-time multi-agent trajectory optimization through two key innovations:
 
 ### 1. Riccati Warm Start for MPC-Aware QP Solving
 
@@ -94,12 +73,6 @@ For reference, we also implemented a centralized approach using OSQP solver with
 - **Scalability:** ADMM scales better due to distributed nature (each agent solves independently in parallel)
 - **Robustness:** ADMM with Riccati warm start provides more consistent QP iteration counts
 
-**Why ADMM Wins at Scale:**
-1. **Parallelization:** Agent subproblems solved independently (OpenMP)
-2. **Smaller QPs:** Each agent solves its own small QP (124 vars) vs one large QP (744 vars for 6 agents)
-3. **Warm starting:** Riccati provides excellent initialization for each agent's QP
-4. **Distributed architecture:** Natural fit for multi-agent systems
-
 ## Visualizations
 
 ### 4-Agent Collision Avoidance Trajectories
@@ -122,10 +95,11 @@ Experience the 6-agent scenario in action: [**Interactive Demo**](https://claude
 - CMake 3.10+
 - OpenMP support
 - Make (for tests directory)
+- OSQP installed (for comparison tests)
 
 ### Building and Running Tests
 
-**Option 1: Run TurboADMM Tests (Recommended)**
+**Run TurboADMM Tests**
 
 ```bash
 cd tests
@@ -139,7 +113,7 @@ make
 
 Each test outputs detailed performance metrics, QP iteration counts, and collision avoidance verification.
 
-**Option 2: Run OSQP Comparison Tests**
+**Run OSQP Comparison Tests**
 
 ```bash
 mkdir build && cd build

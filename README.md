@@ -1,8 +1,41 @@
-This repository demonstrates the significant performance gains achieved by using a Riccati-based primal-dual warm start for multi-agent motion planning. The evidence provided by the 2, 4, and 6-agent test scenarios shows that this feature is critical for enabling real-time, complex multi-agent control.
+# TurboADMM
+### Riccati-Accelerated Distributed Multi-Agent Planning
 
-## Purpose
+> Real-time trajectory optimization for multi-agent systems achieving **5.4× speedup** over centralized methods
 
-The goal of this project is real-time, complex, heterogeneous multi‑agent control. Rather than a full planner, it provides a fast multi‑agent trajectory optimization engine that can be embedded inside a planner. Built on qpOASES, it exploits the hotstart mechanism to reuse KKT factorizations across iterations. Multi‑agent coordination is formulated in a distributed fashion via ADMM, with coupling handled by Lagrangian multipliers. This framework, although solving problems iteratively, is more scalable than the centralized approaches that require monolithic Schur‑complement solves of arrowhead‑structured Hessians.
+[![C++](https://img.shields.io/badge/C++-17-blue.svg)](https://isocpp.org/)
+[![OpenMP](https://img.shields.io/badge/OpenMP-Parallel-green.svg)](https://www.openmp.org/)
+[![qpOASES](https://img.shields.io/badge/qpOASES-MPC--Aware-orange.svg)](https://github.com/coin-or/qpOASES)
+
+---
+
+## 🚀 Key Results
+
+- **70-95% reduction** in QP iterations through Riccati primal-dual warm start
+- **5.4× faster** than centralized OSQP for 6-agent collision avoidance (16ms vs 88ms)
+- **10-60 Hz** real-time control frequency for complex multi-agent scenarios
+- **Scales naturally** with number of agents through distributed ADMM + OpenMP parallelization
+
+## What is TurboADMM?
+
+TurboADMM is a high-performance trajectory optimization engine designed for **real-time multi-agent control**. Instead of solving one massive centralized optimization problem, each agent solves its own small problem in parallel, coordinated through the Alternating Direction Method of Multipliers (ADMM).
+
+**Key Features:**
+- **MPC-Aware QP Solving:** Exploits Model Predictive Control structure using Riccati recursion
+- **Distributed Architecture:** Each agent solves independently, enabling parallelization
+- **OpenMP Parallelization:** Automatic multi-threading for agent subproblems
+- **Embeddable Engine:** Designed to be integrated into larger planning systems
+
+
+## Why TurboADMM?
+
+Rather than a full planner, TurboADMM provides a **fast trajectory optimization engine** that can be embedded inside larger planning systems. Built on qpOASES, it exploits the hotstart mechanism to reuse KKT factorizations across iterations.
+
+**Advantages over centralized approaches:**
+- **Scalability:** Distributed ADMM scales better than monolithic Schur-complement solves
+- **Parallelization:** Agent subproblems solved simultaneously on multi-core CPUs
+- **Modularity:** Easy to add/remove agents or change dynamics
+- **Robustness:** Failure of one agent doesn't crash the entire system
 
 ## Methodology
 
@@ -10,32 +43,16 @@ This work achieves real-time multi-agent trajectory optimization through two key
 
 ### 1. Riccati Warm Start for MPC-Aware QP Solving
 
-Each agent's trajectory optimization is formulated as a Model Predictive Control (MPC) problem solved via quadratic programming (QP). We exploit MPC structure using **Riccati recursion**:
+Each agent's trajectory optimization is formulated as a Model Predictive Control (MPC) problem solved via quadratic programming (QP). We exploit MPC structure using **Riccati recursion** to solve a pure affine LQR as auxiliary QP for qpOASES initialization.
 
-- **Backward Riccati recursion** solves the unconstrained LQR problem analytically in O(N) time
-- Provides optimal primal (trajectory) and dual (costates) warm start for qpOASES
-- **Reduces QP iterations by 70-95%** (e.g., 86 → 4 iterations for 2-agent case)
-- Enables fast convergence even for long horizons
 
 ### 2. OpenMP Parallelization for Distributed ADMM
 
-Multi-agent coordination uses the Alternating Direction Method of Multipliers (ADMM), where each agent solves its own QP independently. We parallelize this using **OpenMP**:
+Multi-agent coordination uses the Alternating Direction Method of Multipliers (ADMM), where each agent solves its own QP independently. Agent subproblems are solved in parallel using OpenMP with automatic thread management.
 
-- Agent subproblems solved in parallel: `#pragma omp parallel for`
-- Automatic thread management to avoid oversubscription
-- **2-3× additional speedup** from parallelization
-- Scales naturally with number of agents and CPU cores
+### 3. Exploit Sparsity of Active Constraints in QR Factorization
 
-This enables real-time multi-agent MPC at 10-60 Hz control frequencies.
-
-## Visualizations
-
-### 4-agent trajectories visualization
-
-![agents_trajectory](https://github.com/user-attachments/assets/a81ab824-7238-467f-98c5-b2c92fd42a8a)
-
-### You can interact with the 6-agent scenario here:
-https://claude.ai/public/artifacts/ca114b27-1b36-4d00-8cde-eb6a9f8d66c7
+Skip Givens rotations in QR factorization when the corresponding entry is zero.
 
 
 ## Performance Evidence
@@ -83,51 +100,65 @@ For reference, we also implemented a centralized approach using OSQP solver with
 3. **Warm starting:** Riccati provides excellent initialization for each agent's QP
 4. **Distributed architecture:** Natural fit for multi-agent systems
 
+## Visualizations
 
-## How to Verify the Results
+### 4-Agent Collision Avoidance Trajectories
 
-You can download this code and run the tests on your own to validate these results.
+![agents_trajectory](https://github.com/user-attachments/assets/a81ab824-7238-467f-98c5-b2c92fd42a8a)
 
-### 1. Build the Tests
+*Four agents successfully navigate to their targets while maintaining safe distances. The distributed ADMM approach coordinates their trajectories in real-time.*
 
-Navigate to the `tests/` directory. If you have `make` installed, you can build all tests:
+### Interactive 6-Agent Demo
+
+Experience the 6-agent scenario in action: [**Interactive Demo**](https://claude.ai/public/artifacts/ca114b27-1b36-4d00-8cde-eb6a9f8d66c7)
+
+*Click to explore the full 6-agent collision avoidance scenario with real-time trajectory visualization.*
+
+## Quick Start
+
+### Prerequisites
+
+- C++17 compiler (GCC, Clang, or MSVC)
+- CMake 3.10+
+- OpenMP support
+- Make (for tests directory)
+
+### Building and Running Tests
+
+**Option 1: Run TurboADMM Tests (Recommended)**
 
 ```bash
 cd tests
 make
+
+# Run the test scenarios
+./bin/test_2agent_rho25   # 2-agent collision avoidance
+./bin/test_4agent_rho25   # 4-agent collision avoidance
+./bin/test_6agent         # 6-agent collision avoidance
 ```
 
-### 2. Run the Scenarios
+Each test outputs detailed performance metrics, QP iteration counts, and collision avoidance verification.
 
-Execute the compiled test files from the `tests/` directory:
-
-```bash
-# Run the 2-agent test
-./bin/test_2agent_rho25
-
-# Run the 4-agent test
-./bin/test_4agent_rho25
-
-# Run the 6-agent test
-./bin/test_6agent
-```
-
-Each test will print a detailed analysis of the trajectory, collision avoidance, and performance statistics, allowing you to verify the results documented above.
-
-### 3. Run OSQP-based SQP Tests (for comparison)
-
-To reproduce the OSQP centralized SQP results:
+**Option 2: Run OSQP Comparison Tests**
 
 ```bash
-# Navigate to build directory and configure with CMake
-cd build
+mkdir build && cd build
 cmake ..
 make
 
-# Run the OSQP tests
+# Run OSQP centralized SQP tests
 ./test_2agent_rho25_osqp
 ./test_4agent_rho25_osqp
 ./test_6agent_osqp
 ```
 
-These tests demonstrate the centralized approach using OSQP solver with SQP for collision constraint linearization, allowing direct comparison with the distributed ADMM approach.
+These demonstrate the centralized approach for direct performance comparison.
+
+### Expected Output
+
+Each test will display:
+- ADMM convergence status and iteration count
+- Total solve time and QP iterations
+- Trajectory tracking accuracy
+- Collision avoidance verification (minimum distances)
+- Performance breakdown by agent

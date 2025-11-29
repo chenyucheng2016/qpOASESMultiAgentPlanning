@@ -75,10 +75,10 @@ To demonstrate TurboADMM's domain-specific advantages, we compare against two to
 | Scenario | SQP Iterations | Solve Time | Notes |
 |:---------|:--------------:|:-----------|:------|
 | 2-agent  | 2              | 55.89 ms   | Fewer iterations but slower per iteration |
-| 4-agent  | 2              | 95.41 ms   | Interior-point overhead |
+| 4-agent  | 2              | 95.41 ms   | Fewer iterations but slower per iteration |
 | 6-agent  | 8              | 332.35 ms  | **20.6× slower** than ADMM |
 
-All processing is conducted on Intel(R) Core(TM) Ultra 7 155H (22 cores).
+All processing is conducted on Intel(R) Core(TM) i7-155H (22 cores).
 
 **Key Observations:**
 - **Small-scale (2-4 agents):** OSQP centralized approach is competitive or slightly faster
@@ -160,5 +160,5 @@ These demonstrate the centralized approach for direct performance comparison.
 - Adding advanced SQP tricks (e.g. metric function, filters, line search, etc.)to current basic implementation
 - Testing on larger scenarios (10+, 20+, 50+ agents)
 - Extending to different robot dynamics (quadrotors, car-like, manipulators)
-- Implementing algorithmic improvements (adaptive ADMM, robust MPC, nonlinear extensions)
+- Implementing algorithmic improvements (adaptive ADMM, robust MPC, etc.)
 

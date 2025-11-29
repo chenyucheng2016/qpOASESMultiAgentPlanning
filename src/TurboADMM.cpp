@@ -1547,8 +1547,8 @@ returnValue TurboADMM::solveColdStart(
                     lbA_combined, ubA_combined,
                     nWSR,
                     nullptr,     // cputime
-                    nullptr,// z_riccati,   // x0: Riccati primal solution
-                    nullptr,//y_riccati,   // y0: Riccati dual solution (costates)
+                    z_riccati,   // x0: Riccati primal solution
+                    y_riccati,   // y0: Riccati dual solution (costates)
                     nullptr,     // guessedBounds
                     nullptr      // guessedConstraints
                 );

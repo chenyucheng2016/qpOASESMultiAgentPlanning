@@ -212,8 +212,25 @@ endif(QPOASES_BUILD_EXAMPLES)
 
 find_package(osqp REQUIRED)
 
+# Find MOSEK
+set(MOSEK_ROOT_DIR "/mnt/c/Users/cheny/Documents/GitHub/mosek/11.0/tools/platform/linux64x86")
+set(MOSEK_INCLUDE_DIR "${MOSEK_ROOT_DIR}/h")
+set(MOSEK_LIBRARY_DIR "${MOSEK_ROOT_DIR}/bin")
+
+# Check if MOSEK directories exist
+if(EXISTS "${MOSEK_INCLUDE_DIR}" AND EXISTS "${MOSEK_LIBRARY_DIR}")
+    message(STATUS "MOSEK found at ${MOSEK_ROOT_DIR}")
+    set(MOSEK_FOUND TRUE)
+    include_directories(${MOSEK_INCLUDE_DIR})
+    link_directories(${MOSEK_LIBRARY_DIR})
+else()
+    message(WARNING "MOSEK not found at ${MOSEK_ROOT_DIR}")
+    set(MOSEK_FOUND FALSE)
+endif()
+
 link_directories(/usr/local/lib)
 
+# OSQP tests
 ADD_EXECUTABLE(test_2agent_rho25_osqp tests/test_2agent_rho25_osqp.cpp)
 TARGET_LINK_LIBRARIES(test_2agent_rho25_osqp qpOASES osqp)
 
@@ -222,6 +239,22 @@ TARGET_LINK_LIBRARIES(test_4agent_rho25_osqp qpOASES osqp)
 
 ADD_EXECUTABLE(test_6agent_osqp tests/test_6agent_osqp.cpp)
 TARGET_LINK_LIBRARIES(test_6agent_osqp qpOASES osqp)
+
+# MOSEK tests (only build if MOSEK is found)
+if(MOSEK_FOUND)
+    ADD_EXECUTABLE(test_2agent_rho25_mosek tests/test_2agent_rho25_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_2agent_rho25_mosek qpOASES mosek64)
+
+    ADD_EXECUTABLE(test_4agent_rho25_mosek tests/test_4agent_rho25_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_4agent_rho25_mosek qpOASES mosek64)
+
+    ADD_EXECUTABLE(test_6agent_mosek tests/test_6agent_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_6agent_mosek qpOASES mosek64)
+    
+    message(STATUS "MOSEK tests will be built")
+else()
+    message(STATUS "MOSEK tests will be skipped (MOSEK not found)")
+endif()
 
 ##
 ##   end of file

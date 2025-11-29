@@ -1,7 +1,7 @@
 # TurboADMM
 ### Riccati-Accelerated Distributed Multi-Agent Planning
 
-> Real-time trajectory optimization for multi-agent systems achieving over **5x speedup** over OSQP based centralized methods
+> Real-time trajectory optimization for multi-agent systems achieving over **5x speedup** compared to top-tier centralized methods
 
 [![C++](https://img.shields.io/badge/C++-17-blue.svg)](https://isocpp.org/)
 [![OpenMP](https://img.shields.io/badge/OpenMP-Parallel-green.svg)](https://www.openmp.org/)
@@ -38,40 +38,56 @@ Skip Givens rotations in QR factorization when the corresponding entry is zero.
 
 The following tables compare the performance of the TurboADMM solver with and without the Riccati warm start feature across three increasingly complex collision avoidance scenarios.
 
-### Standard ADMM with OpenMP (without Riccati Warm Start)
+### ADMM with standard qpOASES + OpenMP
 
-| Scenario | ADMM Iterations | Total QP Iterations | Solve Time | Converged |
-|:---------|:---------------:|:-------------------:|:-----------|:---------:|
-| 2-agent  | 2               | 86                  | 11.58 ms   | YES       |
-| 4-agent  | 6               | 184                 | 23.57 ms   | YES       |
-| 6-agent  | 24              | 344                 | 29.65 ms   | YES       |
+| Scenario | ADMM Iterations | Total QP Iterations | Solve Time |
+|:---------|:---------------:|:-------------------:|:-----------|
+| 2-agent  | 2               | 86                  | 11.58 ms   |
+| 4-agent  | 6               | 184                 | 23.57 ms   |
+| 6-agent  | 24              | 344                 | 29.65 ms   |
 
-### ADMM with Riccati Warm Start + OpenMP Parallelization (This Feature)
+### ADMM with Riccati Warm Start + OpenMP Parallelization
 
-| Scenario | ADMM Iterations | Total QP Iterations | Solve Time | Converged |
-|:---------|:---------------:|:-------------------:|:-----------|:---------:|
-| 2-agent  | 2               | 4                   | 4.89 ms    | YES       |
-| 4-agent  | 6               | 24                  | 7.31 ms    | YES       |
-| 6-agent  | 24              | 104                 | 16.17 ms   | YES       |
+| Scenario | ADMM Iterations | Total QP Iterations | Solve Time |
+|:---------|:---------------:|:-------------------:|:-----------|
+| 2-agent  | 2               | 4                   | 4.89 ms    |
+| 4-agent  | 6               | 24                  | 7.31 ms    |
+| 6-agent  | 24              | 104                 | 16.17 ms   |
 
-All processing is conducted on Intel(R) Core(TM) Ultra 7 155H (22 cores).
+### Comparison with Industry-Leading Generic QP Solvers
 
-### OSQP-based SQP (for comparison)
+To demonstrate TurboADMM's domain-specific advantages, we compare against two top-tier generic sparse QP solvers using centralized SQP formulations:
 
-For reference, we also implemented a centralized approach using OSQP solver with Sequential Quadratic Programming (SQP) for collision constraint linearization:
+#### OSQP-based SQP
+
+[**OSQP**](https://osqp.org/) is a widely-used open-source operator splitting solver, known for its robustness and efficiency on large-scale sparse problems:
 
 | Scenario | SQP Iterations | Solve Time | Notes |
 |:---------|:--------------:|:-----------|:------|
 | 2-agent  | 3              | 3.32 ms    | ✅ Fastest for small problems |
 | 4-agent  | 3              | 6.11 ms    | ✅ Competitive |
-| 6-agent  | 18             | 87.99 ms   | ❌ **5.4× slower** than ADMM |
+| 6-agent  | 18             | 87.99 ms   | **5.4× slower** than ADMM |
+
+#### MOSEK-based SQP
+
+[**MOSEK**](https://www.mosek.com/) is a state-of-the-art commercial interior-point solver, widely regarded as one of the fastest and most reliable solvers for convex optimization:
+
+| Scenario | SQP Iterations | Solve Time | Notes |
+|:---------|:--------------:|:-----------|:------|
+| 2-agent  | 2              | 55.89 ms   | Fewer iterations but slower per iteration |
+| 4-agent  | 2              | 95.41 ms   | Interior-point overhead |
+| 6-agent  | 8              | 332.35 ms  | **20.6× slower** than ADMM |
+
+All processing is conducted on Intel(R) Core(TM) Ultra 7 155H (22 cores).
 
 **Key Observations:**
 - **Small-scale (2-4 agents):** OSQP centralized approach is competitive or slightly faster
 - **Large-scale (6+ agents):** ADMM distributed approach shows clear superiority
   - 6-agent: OSQP 87.99ms vs ADMM 16.17ms (**5.4× faster with ADMM**)
+  - 6-agent: MOSEK 332.35ms vs ADMM 16.17ms (**20.6× slower with MOSEK**)
 - **Scalability:** ADMM scales better due to distributed nature (each agent solves independently in parallel)
 - **Robustness:** ADMM with Riccati warm start provides more consistent QP iteration counts
+- **Solver Choice:** Interior-point methods (MOSEK) have higher per-iteration cost than active-set methods (OSQP, qpOASES)
 
 ## Visualizations
 
@@ -96,6 +112,7 @@ Experience the 6-agent scenario in action: [**Interactive Demo**](https://claude
 - OpenMP support
 - Make (for tests directory)
 - OSQP installed (for comparison tests)
+- MOSEK installed (for comparison tests)
 
 ### Building and Running Tests
 
@@ -121,18 +138,27 @@ cmake ..
 make
 
 # Run OSQP centralized SQP tests
-./test_2agent_rho25_osqp
-./test_4agent_rho25_osqp
-./test_6agent_osqp
+./bin/test_2agent_rho25_osqp
+./bin/test_4agent_rho25_osqp
+./bin/test_6agent_osqp
+```
+
+**Run MOSEK Comparison Tests**
+
+```bash
+# Run MOSEK centralized SQP tests
+./bin/test_2agent_rho25_mosek
+./bin/test_4agent_rho25_mosek
+./bin/test_6agent_mosek
 ```
 
 These demonstrate the centralized approach for direct performance comparison.
 
-### Expected Output
+## You are more than welcomed to contribute via:
 
-Each test will display:
-- ADMM convergence status and iteration count
-- Total solve time and QP iterations
-- Trajectory tracking accuracy
-- Collision avoidance verification (minimum distances)
-- Performance breakdown by agent
+- Improving TurboADMM's performance and scalability
+- Adding advanced SQP tricks (e.g. metric function, filters, line search, etc.)to current basic implementation
+- Testing on larger scenarios (10+, 20+, 50+ agents)
+- Extending to different robot dynamics (quadrotors, car-like, manipulators)
+- Implementing algorithmic improvements (adaptive ADMM, robust MPC, nonlinear extensions)
+

@@ -1,5 +1,5 @@
 # TurboADMM
-### Riccati-Accelerated Distributed Multi-Agent Planning
+### Riccati-Accelerated Distributed Multi-Agent Inference Engine
 
 > Real-time trajectory optimization for multi-agent systems achieving over **5x speedup** compared to top-tier centralized methods
 
@@ -10,7 +10,7 @@
 ---
 ## What is TurboADMM?
 
-TurboADMM is a high-performance trajectory optimization engine designed for **real-time multi-agent control**. Built on top of **qpOASES** (a parametric active-set QP solver), it leverages MPC-aware hotstart and distributed optimization. Instead of solving one massive centralized optimization problem, each agent solves its own small problem in parallel, coordinated through the Alternating Direction Method of Multipliers (ADMM).
+TurboADMM is a high-performance inference engine designed for **real-time multi-agent control**. Built on top of **qpOASES** (a parametric active-set QP solver), it leverages MPC-aware hotstart and distributed optimization. Instead of solving one massive centralized optimization problem, each agent solves its own small problem in parallel, coordinated through the Alternating Direction Method of Multipliers (ADMM).
 
 **Key Features:**
 - **MPC-Aware QP Solving:** Exploits Model Predictive Control structure using Riccati recursion
@@ -38,7 +38,7 @@ Skip Givens rotations in QR factorization when the corresponding entry is zero.
 
 The following tables compare the performance of the TurboADMM solver with and without the Riccati warm start feature across three increasingly complex collision avoidance scenarios.
 
-### ADMM with standard qpOASES + OpenMP
+### BaseADMM: Standard qpOASES + Distributed ADMM
 
 | Scenario | ADMM Iterations | Total QP Iterations | Solve Time |
 |:---------|:---------------:|:-------------------:|:-----------|
@@ -46,7 +46,7 @@ The following tables compare the performance of the TurboADMM solver with and wi
 | 4-agent  | 6               | 184                 | 23.57 ms   |
 | 6-agent  | 24              | 344                 | 29.65 ms   |
 
-### ADMM with Riccati Warm Start + OpenMP Parallelization
+### TurboADMM: Riccati-Accelerated qpOASES + Distributed ADMM
 
 | Scenario | ADMM Iterations | Total QP Iterations | Solve Time |
 |:---------|:---------------:|:-------------------:|:-----------|
@@ -83,10 +83,9 @@ All processing is conducted on Intel(R) Core(TM) i7-155H (22 cores).
 **Key Observations:**
 - **Small-scale (2-4 agents):** OSQP centralized approach is competitive or slightly faster
 - **Large-scale (6+ agents):** ADMM distributed approach shows clear superiority
-  - 6-agent: OSQP 87.99ms vs ADMM 16.17ms (**5.4× faster with ADMM**)
-  - 6-agent: MOSEK 332.35ms vs ADMM 16.17ms (**20.6× slower with MOSEK**)
+  - 6-agent: OSQP 87.99ms vs TurboADMM 16.17ms
+  - 6-agent: MOSEK 332.35ms vs TurboADMM 16.17ms
 - **Scalability:** ADMM scales better due to distributed nature (each agent solves independently in parallel)
-- **Robustness:** ADMM with Riccati warm start provides more consistent QP iteration counts
 - **Solver Choice:** Interior-point methods (MOSEK) have higher per-iteration cost than active-set methods (OSQP, qpOASES)
 
 ## Visualizations
@@ -157,7 +156,7 @@ These demonstrate the centralized approach for direct performance comparison.
 ## You are more than welcomed to contribute via:
 
 - Improving TurboADMM's performance and scalability
-- Adding advanced SQP tricks (e.g. metric function, filters, line search, etc.)to current basic implementation
+- Adding advanced SQP tricks (e.g. metric function, filters, line search, etc.) to current basic implementation
 - Testing on larger scenarios (10+, 20+, 50+ agents)
 - Extending to different robot dynamics (quadrotors, car-like, manipulators)
 - Implementing algorithmic improvements (adaptive ADMM, robust MPC, etc.)

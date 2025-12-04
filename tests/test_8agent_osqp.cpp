@@ -333,17 +333,17 @@ int main()
     // Save fixed part of constraint matrix (dynamics + bounds)
     std::vector<Triplet> A_triplets_fixed = A_triplets;
     
-    // Create OSQP settings (once, outside loop) - match 6-agent test
+    // Create OSQP settings (once, outside loop) - optimized for 8-agent
     OSQPSettings* settings = OSQPSettings_new();
     settings->verbose = 0;
-    settings->max_iter = 20000;
+    settings->max_iter = 300;  // Reduced from 300 to fail fast on difficult QPs
     
     // Create P matrix (once, outside loop)
     OSQPCscMatrix* P = OSQPCscMatrix_new(nV, nV, P_x.size(), P_x.data(), P_i.data(), P_p.data());
     
     // SQP loop
     int max_sqp_iter = 300;  // Increased for 8-agent complexity
-    real_t objective_tol = 5e-3;  // Relaxed tolerance
+    real_t objective_tol = 1e-4;  // Relaxed tolerance
     bool converged = false;
     int final_iter = 0;
     std::vector<real_t> previous_trajectory;
@@ -352,10 +352,13 @@ int main()
     printf("Starting SQP iterations...\n\n");
     
     for (int sqp_iter = 0; sqp_iter < max_sqp_iter; ++sqp_iter) {
+        double iter_start = getTime();
+        
         // Save previous trajectory for convergence check
         previous_trajectory = current_trajectory;
         
         // Rebuild A_triplets: start with fixed part (dynamics + bounds)
+        double rebuild_start = getTime();
         A_triplets = A_triplets_fixed;
         
         // Add coupling constraints based on current_trajectory
@@ -398,8 +401,10 @@ int main()
                 }
             }
         }
+        double rebuild_end = getTime();
         
         // Sort A triplets
+        double sort_start = getTime();
         std::sort(A_triplets.begin(), A_triplets.end(), [](const Triplet& a, const Triplet& b) {
             if (a.col != b.col) return a.col < b.col;
             return a.row < b.row;
@@ -424,20 +429,33 @@ int main()
             A_p_iter[current_col_sort + 1] = idx_sort;
             current_col_sort++;
         }
+        double csc_end = getTime();
         
         // Create matrices
+        double matrix_start = getTime();
         OSQPCscMatrix* A_new = OSQPCscMatrix_new(m, nV, A_x_iter.size(), A_x_iter.data(), A_i_iter.data(), A_p_iter.data());
+        double matrix_end = getTime();
         
         // Solver
+        double setup_start = getTime();
         OSQPSolver* solver_iter;
         OSQPInt exitflag = osqp_setup(&solver_iter, P, q.data(), A_new, l.data(), u.data(), m, nV, settings);
+        double setup_end = getTime();
         
         if (exitflag != 0) {
             printf("OSQP setup failed\n");
             return 1;
         }
         
+        // Warm-start with previous solution (skip first iteration)
+        if (sqp_iter > 0) {
+            osqp_warm_start(solver_iter, current_trajectory.data(), NULL);
+        }
+        
+        double solve_start = getTime();
         exitflag = osqp_solve(solver_iter);
+        double solve_end = getTime();
+        double solve_time = solve_end - solve_start;
         
         if (exitflag != 0) {
             printf("OSQP solve failed with exit code %lld\n", (long long)exitflag);
@@ -446,10 +464,11 @@ int main()
             return 1;
         }
         
-        // Check OSQP status
+        // Check OSQP status (print only first and every 50th iteration)
         if (sqp_iter == 0 || (sqp_iter + 1) % 50 == 0) {
-            printf("  OSQP status: %s, iterations: %lld, obj_val: %.2f, active_collisions: %d\n",
-                   solver_iter->info->status, (long long)solver_iter->info->iter, solver_iter->info->obj_val, num_active_collisions);
+            printf("  SQP iter %d: OSQP status=%s, iters=%lld, obj=%.2f, active_coll=%d, solve_time=%.2f ms\n",
+                   sqp_iter + 1, solver_iter->info->status, (long long)solver_iter->info->iter, 
+                   solver_iter->info->obj_val, num_active_collisions, solve_time);
         }
         
         // Check if solution is valid
@@ -478,6 +497,29 @@ int main()
         
         osqp_cleanup(solver_iter);
         OSQPCscMatrix_free(A_new);
+        
+        double iter_end = getTime();
+        
+        // Print detailed timing breakdown for first iteration only
+        if (sqp_iter == 0) {
+            double rebuild_time = rebuild_end - rebuild_start;
+            double sort_time = csc_end - sort_start;
+            double matrix_time = matrix_end - matrix_start;
+            double setup_time = setup_end - setup_start;
+            double total_iter_time = iter_end - iter_start;
+            
+            printf("\n=== Timing Breakdown (SQP iter 1) ===\n");
+            printf("  Rebuild A_triplets:  %.2f ms (%.1f%%)\n", rebuild_time, 100.0*rebuild_time/total_iter_time);
+            printf("  Sort + CSC build:    %.2f ms (%.1f%%)\n", sort_time, 100.0*sort_time/total_iter_time);
+            printf("  Matrix creation:     %.2f ms (%.1f%%)\n", matrix_time, 100.0*matrix_time/total_iter_time);
+            printf("  OSQP setup:          %.2f ms (%.1f%%)\n", setup_time, 100.0*setup_time/total_iter_time);
+            printf("  OSQP solve:          %.2f ms (%.1f%%)\n", solve_time, 100.0*solve_time/total_iter_time);
+            printf("  Other overhead:      %.2f ms (%.1f%%)\n", 
+                   total_iter_time - rebuild_time - sort_time - matrix_time - setup_time - solve_time,
+                   100.0*(total_iter_time - rebuild_time - sort_time - matrix_time - setup_time - solve_time)/total_iter_time);
+            printf("  Total iteration:     %.2f ms\n", total_iter_time);
+            printf("======================================\n\n");
+        }
         
         // Compute constraint violations
         real_t max_constraint_viol = 0.0;

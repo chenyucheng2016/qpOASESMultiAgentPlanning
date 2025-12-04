@@ -364,7 +364,7 @@ int main()
     // SQP loop
     const int max_sqp_iter = 300;
     const real_t constraint_tol = 1e-4;
-    const real_t objective_tol = 5e-3;
+    const real_t objective_tol = 1e-4;
     
     std::vector<real_t> current_trajectory(nV, 0.0);
     std::vector<real_t> previous_trajectory(nV, 0.0);
@@ -494,7 +494,15 @@ int main()
             return 1;
         }
         
+        // Warm-start with previous solution (skip first iteration)
+        if (sqp_iter > 0) {
+            osqp_warm_start(solver_iter, current_trajectory.data(), NULL);
+        }
+        
+        double solve_start = getTime();
         exitflag = osqp_solve(solver_iter);
+        double solve_end = getTime();
+        double solve_time = solve_end - solve_start;
         
         if (exitflag != 0) {
             printf("OSQP solve failed with exit code %lld\n", (long long)exitflag);
@@ -505,8 +513,9 @@ int main()
         
         // Check OSQP status
         if (sqp_iter == 0 || (sqp_iter + 1) % 50 == 0) {
-            printf("  OSQP status: %s, iterations: %lld, obj_val: %.2f\n",
-                   solver_iter->info->status, (long long)solver_iter->info->iter, solver_iter->info->obj_val);
+            printf("  SQP iter %d: OSQP status=%s, iters=%lld, obj=%.2f, solve_time=%.2f ms\n",
+                   sqp_iter + 1, solver_iter->info->status, (long long)solver_iter->info->iter, 
+                   solver_iter->info->obj_val, solve_time);
         }
         
         // Check if solution is valid

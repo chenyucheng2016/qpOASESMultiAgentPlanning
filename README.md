@@ -83,6 +83,7 @@ To demonstrate TurboADMM's domain-specific advantages, we compare against two to
 | 8-agent  | 7         | 388.27 ms  |    YES    | **11.6× slower** than TurboADMM  |
 
 All processing is conducted on Intel(R) Core(TM) i7-155H (22 cores).
+**Note:** All solvers (ADMM and SQP outer loops) use identical convergence criterion: relative objective change < 1e-4.
 
 **Key Observations:**
 - **Small-scale (2-4 agents):** OSQP centralized approach is competitive or slightly faster

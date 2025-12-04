@@ -1553,78 +1553,9 @@ returnValue TurboADMM::solveColdStart(
                     nullptr      // guessedConstraints
                 );
                 
-                // // ========================================
-                // // Compare Riccati solution with final QP solution
-                // // ========================================
-                // printf("\n================================================================================\n");
-                // printf("[TRAJECTORY COMPARISON] Agent %d - Riccati vs Final QP Solution\n", i);
-                // printf("================================================================================\n");
-                
                 // Get final QP solution from qpOASES
                 real_t* z_final = new real_t[agent.nV];
                 agent_solvers_[i]->getPrimalSolution(z_final);
-                
-                // // Compare trajectories stage by stage
-                // printf("Stage | Riccati Solution (x, u)           | Final QP Solution (x, u)          | Difference\n");
-                // printf("------+-----------------------------------+-----------------------------------+-----------\n");
-                
-                // int idx_traj = 0;
-                // real_t max_state_diff = 0.0;
-                // real_t max_control_diff = 0.0;
-                
-                // for (int k = 0; k <= agent.N; ++k) {
-                //     // State comparison
-                //     printf("  %2d  | x: [", k);
-                //     for (int j = 0; j < agent.nx; ++j) {
-                //         printf("%7.3f", z_riccati[idx_traj + j]);
-                //         if (j < agent.nx - 1) printf(", ");
-                //     }
-                //     printf("] | x: [");
-                //     for (int j = 0; j < agent.nx; ++j) {
-                //         printf("%7.3f", z_final[idx_traj + j]);
-                //         if (j < agent.nx - 1) printf(", ");
-                //     }
-                //     printf("] | ");
-                    
-                //     // Compute state difference
-                //     real_t state_diff = 0.0;
-                //     for (int j = 0; j < agent.nx; ++j) {
-                //         real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
-                //         state_diff += diff * diff;
-                //     }
-                //     state_diff = sqrt(state_diff);
-                //     if (state_diff > max_state_diff) max_state_diff = state_diff;
-                //     printf("%.4f\n", state_diff);
-                    
-                //     idx_traj += agent.nx;
-                    
-                //     // Control comparison (only for k < N)
-                //     if (k < agent.N) {
-                //         printf("      | u: [");
-                //         for (int j = 0; j < agent.nu; ++j) {
-                //             printf("%7.3f", z_riccati[idx_traj + j]);
-                //             if (j < agent.nu - 1) printf(", ");
-                //         }
-                //         printf("] | u: [");
-                //         for (int j = 0; j < agent.nu; ++j) {
-                //             printf("%7.3f", z_final[idx_traj + j]);
-                //             if (j < agent.nu - 1) printf(", ");
-                //         }
-                //         printf("] | ");
-                        
-                //         // Compute control difference
-                //         real_t control_diff = 0.0;
-                //         for (int j = 0; j < agent.nu; ++j) {
-                //             real_t diff = fabs(z_riccati[idx_traj + j] - z_final[idx_traj + j]);
-                //             control_diff += diff * diff;
-                //         }
-                //         control_diff = sqrt(control_diff);
-                //         if (control_diff > max_control_diff) max_control_diff = control_diff;
-                //         printf("%.4f\n", control_diff);
-                        
-                //         idx_traj += agent.nu;
-                //     }
-                // }
                 
                 delete[] z_final;
                 

@@ -22,13 +22,13 @@ struct Triplet {
 
 int main()
 {
-    double total_start = getTime();
+   
     
     printf("================================================================================\n");
-    printf("                    6-AGENT CENTRALIZED MPC WITH OSQP\n");
+    printf("                    8-AGENT CENTRALIZED MPC WITH OSQP\n");
     printf("================================================================================\n\n");
     
-    const int NUM_AGENTS = 6;
+    const int NUM_AGENTS = 8;
     int N = 20;
     int nx = 4;
     int nu = 2;
@@ -38,13 +38,15 @@ int main()
     real_t d_safe_margin = 0.05;  // 5cm margin for OSQP numerical tolerance
     real_t d_safe_constraint = d_safe + d_safe_margin;  // Use 2.05m in constraints
     
-    // Create 6 PointMass agents
+    // Create 8 PointMass agents
     PointMass agent0(N, dt, 10.0, v_max);
     PointMass agent1(N, dt, 10.0, v_max);
     PointMass agent2(N, dt, 10.0, v_max);
     PointMass agent3(N, dt, 10.0, v_max);
     PointMass agent4(N, dt, 10.0, v_max);
     PointMass agent5(N, dt, 10.0, v_max);
+    PointMass agent6(N, dt, 10.0, v_max);
+    PointMass agent7(N, dt, 10.0, v_max);
     
     AgentData* agents = new AgentData[NUM_AGENTS];
     agents[0] = agent0;
@@ -53,9 +55,11 @@ int main()
     agents[3] = agent3;
     agents[4] = agent4;
     agents[5] = agent5;
+    agents[6] = agent6;
+    agents[7] = agent7;
     
     real_t Q_pos = 2.0;   // Position tracking (matching TurboADMM)
-    real_t Q_vel = 0.01;
+    real_t Q_vel = 0.1;
     real_t R_ctrl = 0.1;
     
     for (int i = 0; i < NUM_AGENTS; ++i) {
@@ -149,23 +153,52 @@ int main()
         agents[5].u_ref[k*nu + 1] = 0.0;
     }
     
-    printf("Agent 0: (0, 4.8) -> (15, 4.8) [right]\n");
-    printf("Agent 1: (15, 5.3) -> (0, 5.3) [left]\n");
-    printf("Agent 2: (7.25, 0) -> (7.25, 15) [up]\n");
-    printf("Agent 3: (7.75, 15) -> (7.75, 0) [down]\n");
-    printf("Agent 4: (0, 0) -> (15, 15) [diagonal up-right]\n");
-    printf("Agent 5: (0, 15) -> (15, 0) [diagonal down-right]\n");
+    // Agent 6: (15, 15) -> (0, 0) - diagonal down-left
+    for (int k = 0; k <= N; ++k) {
+        real_t alpha = (real_t)k / N;
+        agents[6].x_ref[k*nx + 0] = 15.0 + alpha * (-15.0);
+        agents[6].x_ref[k*nx + 1] = 15.0 + alpha * (-15.0);
+        agents[6].x_ref[k*nx + 2] = 0.0;
+        agents[6].x_ref[k*nx + 3] = 0.0;
+    }
+    for (int k = 0; k < N; ++k) {
+        agents[6].u_ref[k*nu + 0] = 0.0;
+        agents[6].u_ref[k*nu + 1] = 0.0;
+    }
+    
+    // Agent 7: (15, 0) -> (0, 15) - diagonal up-left
+    for (int k = 0; k <= N; ++k) {
+        real_t alpha = (real_t)k / N;
+        agents[7].x_ref[k*nx + 0] = 15.0 + alpha * (-15.0);
+        agents[7].x_ref[k*nx + 1] = 0.0 + alpha * 15.0;
+        agents[7].x_ref[k*nx + 2] = 0.0;
+        agents[7].x_ref[k*nx + 3] = 0.0;
+    }
+    for (int k = 0; k < N; ++k) {
+        agents[7].u_ref[k*nu + 0] = 0.0;
+        agents[7].u_ref[k*nu + 1] = 0.0;
+    }
+    
+    printf("Agent Configuration:\n");
+    printf("  Agent 0: (0, 4.8) -> (15, 4.8) [horizontal right]\n");
+    printf("  Agent 1: (15, 5.3) -> (0, 5.3) [horizontal left]\n");
+    printf("  Agent 2: (7.25, 0) -> (7.25, 15) [vertical up]\n");
+    printf("  Agent 3: (7.75, 15) -> (7.75, 0) [vertical down]\n");
+    printf("  Agent 4: (0, 0) -> (15, 15) [diagonal ↗]\n");
+    printf("  Agent 5: (0, 15) -> (15, 0) [diagonal ↘]\n");
+    printf("  Agent 6: (15, 15) -> (0, 0) [diagonal ↙]\n");
+    printf("  Agent 7: (15, 0) -> (0, 15) [diagonal ↖]\n");
     printf("Time horizon: N=%d, dt=%.1f s, total time=%.1f s\n", N, dt, N*dt);
     printf("Velocity bounds: -10.0 m/s <= v <= 10.0 m/s\n");
     printf("Safety distance: %.1f m\n\n", d_safe);
     
-    // Build centralized QP for 6 agents
+    // Build centralized QP for 8 agents
     int nV_agent = (N+1)*nx + N*nu;  // 124 per agent
-    int nV = NUM_AGENTS * nV_agent;  // 744 total variables
-    int n_dyn = NUM_AGENTS * N * nx;  // 480 dynamics constraints
-    int n_bounds = 2 * nV;  // 1488 bound constraints
-    int n_coupling = 15 * (N + 1);  // 315 coupling constraints (15 pairs × 21 time steps)
-    int m = n_dyn + n_bounds + n_coupling;  // 2283 total constraints
+    int nV = NUM_AGENTS * nV_agent;  // 992 total variables
+    int n_dyn = NUM_AGENTS * N * nx;  // 640 dynamics constraints
+    int n_bounds = 2 * nV;  // 1984 bound constraints
+    int n_coupling = 28 * (N + 1);  // 588 coupling constraints (28 pairs × 21 time steps)
+    int m = n_dyn + n_bounds + n_coupling;  // 3212 total constraints
     
     // Build P (diagonal Hessian)
     std::vector<OSQPFloat> P_x;
@@ -193,193 +226,83 @@ int main()
     
     // Build q (cost gradient)
     std::vector<OSQPFloat> q(nV, 0.0);
-    for (int i = 0; i < nV; ++i) {
-        int agent_idx = i / nV_agent;
-        int local_i = i % nV_agent;
-        int k = local_i / (nx + nu);
-        int rem = local_i % (nx + nu);
-        if (rem < nx) {
-            q[i] = -P_diag[i] * agents[agent_idx].x_ref[k*nx + rem];
-        } else {
-            if (k < N) q[i] = -P_diag[i] * agents[agent_idx].u_ref[k*nu + (rem - nx)];
-        }
-    }
-    
-    // Build A (dynamics, bounds, coupling)
-    std::vector<Triplet> A_triplets;
-    
-    // Dynamics constraints for all 6 agents
-    for (int agent_idx = 0; agent_idx < NUM_AGENTS; ++agent_idx) {
-        int offset = agent_idx * nV_agent;
-        int row_offset = agent_idx * N * nx;
-        for (int k = 0; k < N; ++k) {
-            int idx_xk = offset + k * (nx + nu);
-            int idx_uk = idx_xk + nx;
-            int idx_xkp1 = offset + (k+1) * (nx + nu);
-            for (int j = 0; j < nx; ++j) {
-                int row = row_offset + k * nx + j;
-                // x_{k+1,j}
-                A_triplets.push_back({row, idx_xkp1 + j, 1.0});
-                // -A[j,:] * x_k
-                for (int l = 0; l < nx; ++l) {
-                    OSQPFloat val = -agents[agent_idx].A[j*nx + l];
-                    if (fabs(val) > 1e-12) A_triplets.push_back({row, idx_xk + l, val});
-                }
-                // -B[j,:] * u_k
-                for (int l = 0; l < nu; ++l) {
-                    OSQPFloat val = -agents[agent_idx].B[j*nu + l];
-                    if (fabs(val) > 1e-12) A_triplets.push_back({row, idx_uk + l, val});
-                }
-            }
-        }
-    }
-    
-    // Bounds (upper and lower for all variables)
-    for (int i = 0; i < nV; ++i) {
-        int row_ub = n_dyn + i;
-        A_triplets.push_back({row_ub, i, 1.0});  // x_i <= ub
-        
-        int row_lb = n_dyn + nV + i;
-        A_triplets.push_back({row_lb, i, 1.0});  // x_i >= lb
-    }
-    
-    // Coupling constraints (initialized based on reference, will be updated in SQP)
-    // 15 pairs: (0,1), (0,2), (0,3), (0,4), (0,5), (1,2), (1,3), (1,4), (1,5), (2,3), (2,4), (2,5), (3,4), (3,5), (4,5)
-    int pair_indices[15][2] = {
-        {0,1}, {0,2}, {0,3}, {0,4}, {0,5},
-        {1,2}, {1,3}, {1,4}, {1,5},
-        {2,3}, {2,4}, {2,5},
-        {3,4}, {3,5},
-        {4,5}
-    };
-    
-    for (int pair = 0; pair < 15; ++pair) {
-        int i0 = pair_indices[pair][0];
-        int i1 = pair_indices[pair][1];
+    for (int i = 0; i < NUM_AGENTS; ++i) {
         for (int k = 0; k <= N; ++k) {
-            int row = n_dyn + n_bounds + pair * (N+1) + k;
-            OSQPFloat x0_ref = agents[i0].x_ref[k*nx + 0];
-            OSQPFloat y0_ref = agents[i0].x_ref[k*nx + 1];
-            OSQPFloat x1_ref = agents[i1].x_ref[k*nx + 0];
-            OSQPFloat y1_ref = agents[i1].x_ref[k*nx + 1];
-            OSQPFloat dx = x0_ref - x1_ref;
-            OSQPFloat dy = y0_ref - y1_ref;
-            OSQPFloat dist = sqrt(dx*dx + dy*dy);
-            
-            // Always activate constraint, use safe default normal if agents are too close in reference
-            OSQPFloat nx_c, ny_c;
-            if (dist > 1e-3) {
-                nx_c = dx / dist;
-                ny_c = dy / dist;
-            } else {
-                // Use horizontal separation as default when reference trajectories overlap
-                nx_c = 1.0;
-                ny_c = 0.0;
+            for (int j = 0; j < nx; ++j) {
+                int idx = i * nV_agent + k * (nx + nu) + j;
+                q[idx] = -agents[i].Q_diag[j] * agents[i].x_ref[k*nx + j];
             }
-            
-            int idx_x0 = i0 * nV_agent + k * (nx + nu);
-            int idx_y0 = idx_x0 + 1;
-            int idx_x1 = i1 * nV_agent + k * (nx + nu);
-            int idx_y1 = idx_x1 + 1;
-            A_triplets.push_back({row, idx_x0, nx_c});
-            A_triplets.push_back({row, idx_y0, ny_c});
-            A_triplets.push_back({row, idx_x1, -nx_c});
-            A_triplets.push_back({row, idx_y1, -ny_c});
+        }
+        for (int k = 0; k < N; ++k) {
+            for (int j = 0; j < nu; ++j) {
+                int idx = i * nV_agent + k * (nx + nu) + nx + j;
+                q[idx] = -agents[i].R_diag[j] * agents[i].u_ref[k*nu + j];
+            }
         }
     }
     
-    // Sort and build CSC format for A
-    std::sort(A_triplets.begin(), A_triplets.end(), [](const Triplet& a, const Triplet& b) {
-        if (a.col != b.col) return a.col < b.col;
-        return a.row < b.row;
-    });
+    // Build constraint matrix A
+    std::vector<Triplet> A_triplets;
+    std::vector<OSQPFloat> l(m), u(m);
+    int row = 0;
     
-    std::vector<OSQPFloat> A_x(A_triplets.size());
-    std::vector<OSQPInt> A_i(A_triplets.size()), A_p(nV + 1, 0);
-    int idx = 0;
-    int current_col = 0;
-    for (auto& t : A_triplets) {
-        while (current_col < t.col) {
-            A_p[current_col + 1] = idx;
-            current_col++;
+    // Dynamics constraints: x[k+1] = A*x[k] + B*u[k]
+    for (int i = 0; i < NUM_AGENTS; ++i) {
+        for (int k = 0; k < N; ++k) {
+            for (int j = 0; j < nx; ++j) {
+                int col_xk = i * nV_agent + k * (nx + nu) + j;
+                int col_uk = i * nV_agent + k * (nx + nu) + nx;
+                int col_xkp1 = i * nV_agent + (k+1) * (nx + nu) + j;
+                
+                // A*x[k]
+                for (int jj = 0; jj < nx; ++jj) {
+                    A_triplets.push_back({row, col_xk - j + jj, agents[i].A[j*nx + jj]});
+                }
+                // B*u[k]
+                for (int jj = 0; jj < nu; ++jj) {
+                    A_triplets.push_back({row, col_uk + jj, agents[i].B[j*nu + jj]});
+                }
+                // -x[k+1]
+                A_triplets.push_back({row, col_xkp1, -1.0});
+                
+                l[row] = 0.0;
+                u[row] = 0.0;
+                row++;
+            }
         }
-        A_i[idx] = t.row;
-        A_x[idx] = t.val;
-        idx++;
-        A_p[current_col + 1] = idx;
-    }
-    while (current_col < nV) {
-        A_p[current_col + 1] = idx;
-        current_col++;
     }
     
-    // Constraint bounds l and u
-    std::vector<OSQPFloat> l(m, 0.0);
-    std::vector<OSQPFloat> u(m, 0.0);
-    
-    // Dynamics: equality (l=u=0)
-    for (int i = 0; i < n_dyn; ++i) {
-        l[i] = 0.0;
-        u[i] = 0.0;
-    }
-    
-    // Variable bounds
+    // Variable bounds (converted to constraints)
     for (int i = 0; i < nV; ++i) {
+        // Lower bound: x_i >= lb_i  =>  x_i >= lb_i
+        A_triplets.push_back({row, i, 1.0});
         int agent_idx = i / nV_agent;
         int local_i = i % nV_agent;
+        l[row] = agents[agent_idx].lb[local_i];
+        u[row] = OSQPFloat(1e20);
+        row++;
         
-        int row_ub = n_dyn + i;
-        l[row_ub] = -OSQP_INFTY;
-        u[row_ub] = agents[agent_idx].ub[local_i % nV_agent];
-        
-        int row_lb = n_dyn + nV + i;
-        l[row_lb] = agents[agent_idx].lb[local_i % nV_agent];
-        u[row_lb] = OSQP_INFTY;
-        
-        // Fix initial positions to initial state (for all 6 agents)
-        if (local_i < nx) {
-            u[row_ub] = agents[agent_idx].x_ref[0*nx + local_i];
-            l[row_lb] = agents[agent_idx].x_ref[0*nx + local_i];
-        }
+        // Upper bound: x_i <= ub_i  =>  x_i <= ub_i
+        A_triplets.push_back({row, i, 1.0});
+        l[row] = OSQPFloat(-1e20);
+        u[row] = agents[agent_idx].ub[local_i];
+        row++;
     }
     
-    // Initialize coupling bounds to inactive (will be set dynamically in SQP loop)
-    for (int i = n_dyn + n_bounds; i < m; ++i) {
-        l[i] = -OSQP_INFTY;
-        u[i] = OSQP_INFTY;
-    }
-    
-    // Create matrices
-    OSQPCscMatrix* P = OSQPCscMatrix_new(nV, nV, P_x.size(), P_x.data(), P_i.data(), P_p.data());
-    OSQPCscMatrix* A = OSQPCscMatrix_new(m, nV, A_x.size(), A_x.data(), A_i.data(), A_p.data());
-    
-    // Settings
-    OSQPSettings* settings = OSQPSettings_new();
-    settings->verbose = 0;
-    settings->max_iter = 20000;
-    
-    // Solver
-    OSQPSolver* solver;
-    
-    // SQP loop
-    const int max_sqp_iter = 300;
-    const real_t constraint_tol = 1e-4;
-    const real_t objective_tol = 5e-3;
-    
-    std::vector<real_t> current_trajectory(nV, 0.0);
-    std::vector<real_t> previous_trajectory(nV, 0.0);
-    real_t previous_objective = 1e30;
-    
-    // Store dynamics and bounds triplets (constant across SQP iterations)
-    std::vector<Triplet> A_triplets_fixed;
-    for (const auto& t : A_triplets) {
-        if (t.row < n_dyn + n_bounds) {
-            A_triplets_fixed.push_back(t);
-        }
-    }
+    // Collision avoidance constraints (28 pairs)
+    int pair_indices[28][2] = {
+        {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6}, {0,7},
+        {1,2}, {1,3}, {1,4}, {1,5}, {1,6}, {1,7},
+        {2,3}, {2,4}, {2,5}, {2,6}, {2,7},
+        {3,4}, {3,5}, {3,6}, {3,7},
+        {4,5}, {4,6}, {4,7},
+        {5,6}, {5,7},
+        {6,7}
+    };
     
     // Initialize with collision-free trajectory by making agents wait at start
     // This avoids the infeasible initial condition where all agents collide at center
+    std::vector<real_t> current_trajectory(nV);
     for (int agent_idx = 0; agent_idx < NUM_AGENTS; ++agent_idx) {
         int wait_steps = agent_idx * 3;  // Each agent waits 3 time steps longer than previous
         for (int k = 0; k <= N; ++k) {
@@ -407,8 +330,31 @@ int main()
         }
     }
     
+    // Save fixed part of constraint matrix (dynamics + bounds)
+    std::vector<Triplet> A_triplets_fixed = A_triplets;
+    
+    // Create OSQP settings (once, outside loop)
+    OSQPSettings* settings = OSQPSettings_new();
+    settings->verbose = 0;
+    settings->eps_abs = 1e-4;  // Relaxed from 1e-5
+    settings->eps_rel = 1e-4;  // Relaxed from 1e-5
+    settings->max_iter = 20000;  // Increased from 10000
+    settings->alpha = 1.6;  // Over-relaxation for faster convergence
+    settings->adaptive_rho = 1;  // Enable adaptive penalty parameter
+    settings->polishing = 0;  // Enable solution polishing
+    
+    // Create P matrix (once, outside loop)
+    OSQPCscMatrix* P = OSQPCscMatrix_new(nV, nV, P_x.size(), P_x.data(), P_i.data(), P_p.data());
+    
+    // SQP loop
+    int max_sqp_iter = 300;  // Increased for 8-agent complexity
+    real_t objective_tol = 5e-3;  // Relaxed tolerance
     bool converged = false;
     int final_iter = 0;
+    std::vector<real_t> previous_trajectory;
+    real_t previous_objective = 0.0;
+    double total_start = getTime();
+    printf("Starting SQP iterations...\n\n");
     
     for (int sqp_iter = 0; sqp_iter < max_sqp_iter; ++sqp_iter) {
         // Save previous trajectory for convergence check
@@ -419,11 +365,11 @@ int main()
         
         // Add coupling constraints based on current_trajectory
         int num_active_collisions = 0;
-        for (int pair = 0; pair < 15; ++pair) {
+        for (int pair = 0; pair < 28; ++pair) {
             int i0 = pair_indices[pair][0];
             int i1 = pair_indices[pair][1];
             for (int k = 0; k <= N; ++k) {
-                int row = n_dyn + n_bounds + pair * (N+1) + k;
+                int constraint_row = n_dyn + n_bounds + pair * (N+1) + k;
                 int idx0 = i0 * nV_agent + k * (nx + nu);
                 int idx1 = i1 * nV_agent + k * (nx + nu);
                 real_t p0x = current_trajectory[idx0];
@@ -433,6 +379,8 @@ int main()
                 real_t dx = p0x - p1x;
                 real_t dy = p0y - p1y;
                 real_t dist = sqrt(dx*dx + dy*dy);
+                
+                // Selective activation: only add constraint when agents are close
                 if (dist > 0 && dist < d_safe_constraint * 3.0) {
                     num_active_collisions++;
                     real_t nx_c = dx / dist;
@@ -441,17 +389,17 @@ int main()
                     int idx_y0 = idx0 + 1;
                     int idx_x1 = idx1;
                     int idx_y1 = idx1 + 1;
-                    A_triplets.push_back({row, idx_x0, nx_c});
-                    A_triplets.push_back({row, idx_y0, ny_c});
-                    A_triplets.push_back({row, idx_x1, -nx_c});
-                    A_triplets.push_back({row, idx_y1, -ny_c});
-                    // Set bounds for active constraint (use margin for numerical tolerance)
-                    l[row] = d_safe_constraint;
-                    u[row] = OSQP_INFTY;
+                    A_triplets.push_back({constraint_row, idx_x0, nx_c});
+                    A_triplets.push_back({constraint_row, idx_y0, ny_c});
+                    A_triplets.push_back({constraint_row, idx_x1, -nx_c});
+                    A_triplets.push_back({constraint_row, idx_y1, -ny_c});
+                    // Set bounds for active constraint
+                    l[constraint_row] = d_safe_constraint;
+                    u[constraint_row] = OSQP_INFTY;
                 } else {
                     // Agents are far - constraint inactive
-                    l[row] = -OSQP_INFTY;
-                    u[row] = OSQP_INFTY;
+                    l[constraint_row] = -OSQP_INFTY;
+                    u[constraint_row] = OSQP_INFTY;
                 }
             }
         }
@@ -505,8 +453,8 @@ int main()
         
         // Check OSQP status
         if (sqp_iter == 0 || (sqp_iter + 1) % 50 == 0) {
-            printf("  OSQP status: %s, iterations: %lld, obj_val: %.2f\n",
-                   solver_iter->info->status, (long long)solver_iter->info->iter, solver_iter->info->obj_val);
+            printf("  OSQP status: %s, iterations: %lld, obj_val: %.2f, active_collisions: %d\n",
+                   solver_iter->info->status, (long long)solver_iter->info->iter, solver_iter->info->obj_val, num_active_collisions);
         }
         
         // Check if solution is valid
@@ -539,9 +487,11 @@ int main()
         // Compute constraint violations
         real_t max_constraint_viol = 0.0;
         real_t min_dist_iter = 1e10;
-        for (int pair = 0; pair < 15; ++pair) {
+        
+        for (int pair = 0; pair < 28; ++pair) {
             int i0 = pair_indices[pair][0];
             int i1 = pair_indices[pair][1];
+            
             for (int k = 0; k <= N; ++k) {
                 int idx0 = i0 * nV_agent + k * (nx + nu);
                 int idx1 = i1 * nV_agent + k * (nx + nu);
@@ -580,6 +530,10 @@ int main()
         previous_objective = current_objective;
     }
     
+    // Cleanup OSQP resources
+    OSQPCscMatrix_free(P);
+    OSQPSettings_free(settings);
+    
     // Extract final trajectories
     real_t** z = new real_t*[NUM_AGENTS];
     for (int i = 0; i < NUM_AGENTS; ++i) {
@@ -607,7 +561,7 @@ int main()
     // Verify collision constraints for all pairs
     printf("\nMinimum distances between agent pairs:\n");
     real_t global_min_dist = 1e10;
-    for (int pair = 0; pair < 15; ++pair) {
+    for (int pair = 0; pair < 28; ++pair) {
         int i0 = pair_indices[pair][0];
         int i1 = pair_indices[pair][1];
         real_t min_dist_pair = 1e10;
@@ -630,24 +584,7 @@ int main()
         printf("Collision constraints violated!\n");
     }
     
-    // Print full trajectories
-    for (int i = 0; i < NUM_AGENTS; ++i) {
-        printf("\nAgent %d full trajectory:\n", i);
-        for (int k = 0; k <= N; ++k) {
-            int traj_idx = k * (nx + nu);
-            printf("k=%d: x=(%.3f, %.3f, %.3f, %.3f)", k, 
-                   z[i][traj_idx], z[i][traj_idx+1], z[i][traj_idx+2], z[i][traj_idx+3]);
-            if (k < N) {
-                printf(" u=(%.3f, %.3f)", z[i][traj_idx+nx], z[i][traj_idx+nx+1]);
-            }
-            printf("\n");
-        }
-    }
-    
-    // Cleanup
-    OSQPCscMatrix_free(A);
-    OSQPCscMatrix_free(P);
-    OSQPSettings_free(settings);
+    // Cleanup (matrices and settings already freed in loop)
     
     for (int i = 0; i < NUM_AGENTS; ++i) {
         delete[] z[i];
@@ -656,7 +593,7 @@ int main()
     delete[] agents;
     
     double total_end = getTime();
-    printf("Total execution time: %.3f ms\n", total_end - total_start);
+    printf("\nTotal execution time: %.3f ms\n", total_end - total_start);
     
     return 0;
 }

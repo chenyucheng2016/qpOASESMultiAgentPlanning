@@ -38,21 +38,23 @@ Skip Givens rotations in QR factorization when the corresponding entry is zero.
 
 The following tables compare the performance of the TurboADMM solver with and without the Riccati warm start feature across three increasingly complex collision avoidance scenarios.
 
-### BaseADMM: Standard qpOASES + Distributed ADMM
+### BaseADMM: Standard qpOASES + Distributed ADMM + OpenMP Parallelization
 
-| Scenario | ADMM Iterations | Total QP Iterations | Solve Time |
-|:---------|:---------------:|:-------------------:|:-----------|
-| 2-agent  | 2               | 86                  | 11.58 ms   |
-| 4-agent  | 6               | 184                 | 23.57 ms   |
-| 6-agent  | 24              | 344                 | 29.65 ms   |
+| Scenario | ADMM Iters | Total QP Iters | Solve Time | Converged |
+|:---------|:----------:|:--------------:|:-----------|:---------:|
+| 2-agent  | 2          | 86             | 11.58 ms   |    YES    |
+| 4-agent  | 6          | 184            | 23.57 ms   |    YES    |
+| 6-agent  | 24         | 344            | 29.65 ms   |    YES    |
+| 8-agent  | 46         | 550            | 56.52 ms   |    YES    |
 
-### TurboADMM: Riccati-Accelerated qpOASES + Distributed ADMM
+### TurboADMM: Riccati-Accelerated qpOASES + Distributed ADMM + OpenMP Parallelization
 
-| Scenario | ADMM Iterations | Total QP Iterations | Solve Time |
-|:---------|:---------------:|:-------------------:|:-----------|
-| 2-agent  | 2               | 4                   | 4.89 ms    |
-| 4-agent  | 6               | 24                  | 7.31 ms    |
-| 6-agent  | 24              | 104                 | 16.17 ms   |
+| Scenario | ADMM Iters | Total QP Iters | Solve Time | Converged |
+|:---------|:----------:|:--------------:|:-----------|:---------:|
+| 2-agent  | 2          | 4              | 4.89 ms    |    YES    |
+| 4-agent  | 6          | 24             | 7.31 ms    |    YES    |
+| 6-agent  | 24         | 104            | 16.17 ms   |    YES    |
+| 8-agent  | 46         | 230            | 33.53 ms   |    YES    |
 
 ### Comparison with Industry-Leading Generic QP Solvers
 
@@ -62,21 +64,23 @@ To demonstrate TurboADMM's domain-specific advantages, we compare against two to
 
 [**OSQP**](https://osqp.org/) is a widely-used open-source operator splitting solver, known for its robustness and efficiency on large-scale sparse problems:
 
-| Scenario | SQP Iterations | Solve Time | Notes |
-|:---------|:--------------:|:-----------|:------|
-| 2-agent  | 3              | 3.32 ms    | ✅ Fastest for small problems |
-| 4-agent  | 3              | 6.11 ms    | ✅ Competitive |
-| 6-agent  | 18             | 87.99 ms   | **5.4× slower** than ADMM |
+| Scenario | SQP Iters | Solve Time  | Converged | Notes                           |
+|:---------|:---------:|:------------|:---------:|:--------------------------------|
+| 2-agent  | 3         | 3.32 ms     |    YES    | Faster than TurboADMM           |
+| 4-agent  | 3         | 6.11 ms     |    YES    | Competitive with TurboADMM      |
+| 6-agent  | 8         | 39.62 ms    |    YES    | **2.5× slower** than TurboADMM  |
+| 8-agent  | 9         | 1,076.26 ms |    YES    | **32.1× slower** than TurboADMM |
 
 #### MOSEK-based SQP
 
 [**MOSEK**](https://www.mosek.com/) is a state-of-the-art commercial interior-point solver, widely regarded as one of the fastest and most reliable solvers for convex optimization:
 
-| Scenario | SQP Iterations | Solve Time | Notes |
-|:---------|:--------------:|:-----------|:------|
-| 2-agent  | 2              | 55.89 ms   | Fewer iterations but slower per iteration |
-| 4-agent  | 2              | 95.41 ms   | Fewer iterations but slower per iteration |
-| 6-agent  | 8              | 332.35 ms  | **20.6× slower** than ADMM |
+| Scenario | SQP Iters | Solve Time | Converged | Notes                            |
+|:---------|:---------:|:-----------|:---------:|:---------------------------------|
+| 2-agent  | 2         | 55.89 ms   |    YES    | **11.42× slower** than TurboADMM |
+| 4-agent  | 2         | 95.41 ms   |    YES    | **13.05× slower** than TurboADMM |
+| 6-agent  | 8         | 320.23 ms  |    YES    | **19.8× slower** than TurboADMM  |
+| 8-agent  | 7         | 388.27 ms  |    YES    | **11.6× slower** than TurboADMM  |
 
 All processing is conducted on Intel(R) Core(TM) i7-155H (22 cores).
 

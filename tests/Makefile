@@ -13,7 +13,7 @@ BINDIR = bin
 UTILDIR = utils
 
 # Targets
-TESTS = test_2agent_rho25 test_4agent_rho25 test_6agent
+TESTS = test_2agent_rho25 test_4agent_rho25 test_6agent test_8agent
 
 # Default target
 all: $(BINDIR) $(TESTS)
@@ -40,4 +40,8 @@ test_4agent_rho25: $(BINDIR) test_4agent_rho25.cpp
 
 test_6agent: $(BINDIR) test_6agent.cpp
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ test_6agent.cpp $(SOURCES) -lm
+	@echo "Built: $(BINDIR)/$@"
+
+test_8agent: $(BINDIR) test_8agent.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $(BINDIR)/$@ test_8agent.cpp $(SOURCES) -lm
 	@echo "Built: $(BINDIR)/$@"

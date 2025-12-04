@@ -240,6 +240,9 @@ TARGET_LINK_LIBRARIES(test_4agent_rho25_osqp qpOASES osqp)
 ADD_EXECUTABLE(test_6agent_osqp tests/test_6agent_osqp.cpp)
 TARGET_LINK_LIBRARIES(test_6agent_osqp qpOASES osqp)
 
+ADD_EXECUTABLE(test_8agent_osqp tests/test_8agent_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_8agent_osqp qpOASES osqp)
+
 # MOSEK tests (only build if MOSEK is found)
 if(MOSEK_FOUND)
     ADD_EXECUTABLE(test_2agent_rho25_mosek tests/test_2agent_rho25_mosek.cpp)
@@ -250,7 +253,10 @@ if(MOSEK_FOUND)
 
     ADD_EXECUTABLE(test_6agent_mosek tests/test_6agent_mosek.cpp)
     TARGET_LINK_LIBRARIES(test_6agent_mosek qpOASES mosek64)
-    
+
+    ADD_EXECUTABLE(test_8agent_mosek tests/test_8agent_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_8agent_mosek qpOASES mosek64)
+
     message(STATUS "MOSEK tests will be built")
 else()
     message(STATUS "MOSEK tests will be skipped (MOSEK not found)")

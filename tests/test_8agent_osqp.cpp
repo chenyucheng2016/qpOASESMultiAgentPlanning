@@ -333,15 +333,10 @@ int main()
     // Save fixed part of constraint matrix (dynamics + bounds)
     std::vector<Triplet> A_triplets_fixed = A_triplets;
     
-    // Create OSQP settings (once, outside loop)
+    // Create OSQP settings (once, outside loop) - match 6-agent test
     OSQPSettings* settings = OSQPSettings_new();
     settings->verbose = 0;
-    settings->eps_abs = 1e-4;  // Relaxed from 1e-5
-    settings->eps_rel = 1e-4;  // Relaxed from 1e-5
-    settings->max_iter = 20000;  // Increased from 10000
-    settings->alpha = 1.6;  // Over-relaxation for faster convergence
-    settings->adaptive_rho = 1;  // Enable adaptive penalty parameter
-    settings->polishing = 0;  // Enable solution polishing
+    settings->max_iter = 20000;
     
     // Create P matrix (once, outside loop)
     OSQPCscMatrix* P = OSQPCscMatrix_new(nV, nV, P_x.size(), P_x.data(), P_i.data(), P_p.data());

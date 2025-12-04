@@ -69,7 +69,7 @@ To demonstrate TurboADMM's domain-specific advantages, we compare against two to
 | 2-agent  | 3         | 3.32 ms     |    YES    | Faster than TurboADMM           |
 | 4-agent  | 3         | 6.11 ms     |    YES    | Competitive with TurboADMM      |
 | 6-agent  | 8         | 39.62 ms    |    YES    | **2.5× slower** than TurboADMM  |
-| 8-agent  | 9         | 1,076.26 ms |    YES    | **32.1× slower** than TurboADMM |
+| 8-agent  | 8         | 528.54 ms   |    YES    | **15.8× slower** than TurboADMM |
 
 #### MOSEK-based SQP
 

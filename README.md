@@ -107,18 +107,6 @@ To demonstrate TurboADMM's domain-specific advantages, we compare against two to
 | 4-agent             | 0         | 11             | -          |  **NO**   | -                  | **Fails: Minimum step length (status 2)** |
 | 6-agent             | 0         | 11             | -          |  **NO**   | -                  | **Fails: Minimum step length (status 2)** |
 
-**Configuration:** Hard constraints (no slack variables), matching OSQP setup for fair comparison  
-**Initialization:** Staggered start (2-agent) or manually designed feasible curves (4+ agents)
-
-**Key Findings:**
-- ✅ **2 agents:** HPIPM converges successfully with hard constraints, competitive performance (3.65-4.77ms)
-- ❌ **4+ agents:** HPIPM fails even with carefully designed feasible initialization (manually designed collision avoidance curves)
-- **Failure mode:** Interior point method encounters minimum step length (alpha < alpha_min), returns nonsensical solution
-- **Root cause:** Lack of feasibility restoration mechanisms and homogeneous embedding makes HPIPM sensitive to the number and dynamics of active collision constraints
-- **Residuals at failure:** Complementarity: 417, Stationarity: 159, Equality/Inequality: 14.8 (all exceed tolerance by 2-4 orders of magnitude)
-
-**Conclusion:** HPIPM is unsuitable for multi-agent collision avoidance beyond 2-3 agents. ADMM-based solvers (TurboADMM, OSQP) handle large-scale problems robustly through progressive feasibility enforcement.
-
 All processing is conducted on Intel(R) Core(TM) i7-155H (22 cores).
 **Note:** All solvers (ADMM and SQP outer loops) use identical convergence criterion: relative objective change < 1e-4, and collision free.
 **Note:** Tracking error standards for mean and standard dev of final state tracking errorover all agents.

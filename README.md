@@ -211,10 +211,14 @@ make
 ```
 
 **Run Time Comparsion Tests**
+```bash
 ./benchmark_tests.sh
+```
 
 **HPIPM Convergence Analysis/GLPK feasibility check**
+```bash
 ./hpipmSovlerData/lp_feasibility_test_glpk.m
+```
 
 These demonstrate the centralized approach for direct performance comparison.
 

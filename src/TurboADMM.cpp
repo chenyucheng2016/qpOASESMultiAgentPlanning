@@ -1071,7 +1071,7 @@ returnValue TurboADMM::setupAgentSolvers()
         memset(agent_Q_aug_[i], 0, agent.nx * agent.nx * sizeof(real_t));
         
         // CRITICAL: Apply stage weight (0.5) to match Hessian construction
-        real_t stage_weight = 0.5;
+        real_t stage_weight = 1.0;
         for (int j = 0; j < agent.nx; ++j) {
             agent_Q_aug_[i][j * agent.nx + j] = stage_weight * agent.Q[j * agent.nx + j];
         }
@@ -1337,7 +1337,7 @@ returnValue TurboADMM::solveColdStart(
                 for (int k = 0; k <= agent.N; ++k) {
                     // State cost Q + ADMM augmentation for position
                     // Uniform stage weights: 50% for all stages (including terminal)
-                    real_t stage_weight = 0.5;  // 50% for all stages
+                    real_t stage_weight = 1.0;  // 50% for all stages
                     
                     for (int j = 0; j < agent.nx; ++j) {
                         // Apply stage-dependent weight to tracking cost
@@ -1746,7 +1746,7 @@ returnValue TurboADMM::computeTrackingGradient(int agent_id, real_t* g_out)
     for (int k = 0; k < agent.N; ++k) {
         // Apply uniform weight (must match Hessian!)
         // All stages: 50%
-        real_t stage_weight = 0.5;  // All stages
+        real_t stage_weight = 1.0;  // All stages
         
         // State x_k
         for (int i = 0; i < agent.nx; ++i) {
@@ -1762,7 +1762,7 @@ returnValue TurboADMM::computeTrackingGradient(int agent_id, real_t* g_out)
     }
     
     // Terminal state x_N (50% weight, same as all stages)
-    real_t terminal_weight = 0.5;
+    real_t terminal_weight = 1.0;
 
     for (int i = 0; i < agent.nx; ++i) {
         real_t diff = 0.0 - agent.x_ref[agent.N * agent.nx + i];

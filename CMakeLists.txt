@@ -230,12 +230,44 @@ endif()
 
 link_directories(/usr/local/lib)
 
-# OSQP tests
-ADD_EXECUTABLE(test_2agent_rho25_osqp tests/test_2agent_rho25_osqp.cpp)
-TARGET_LINK_LIBRARIES(test_2agent_rho25_osqp qpOASES osqp)
+# Find BLASFEO (required by HPIPM)
+set(BLASFEO_ROOT_DIR "/opt/blasfeo")
+set(BLASFEO_INCLUDE_DIR "${BLASFEO_ROOT_DIR}/include")
+set(BLASFEO_LIBRARY_DIR "${BLASFEO_ROOT_DIR}/lib")
 
-ADD_EXECUTABLE(test_4agent_rho25_osqp tests/test_4agent_rho25_osqp.cpp)
-TARGET_LINK_LIBRARIES(test_4agent_rho25_osqp qpOASES osqp)
+# Check if BLASFEO directories exist
+if(EXISTS "${BLASFEO_INCLUDE_DIR}" AND EXISTS "${BLASFEO_LIBRARY_DIR}")
+    message(STATUS "BLASFEO found at ${BLASFEO_ROOT_DIR}")
+    set(BLASFEO_FOUND TRUE)
+    include_directories(${BLASFEO_INCLUDE_DIR})
+    link_directories(${BLASFEO_LIBRARY_DIR})
+else()
+    message(WARNING "BLASFEO not found at ${BLASFEO_ROOT_DIR}")
+    set(BLASFEO_FOUND FALSE)
+endif()
+
+# Find HPIPM
+set(HPIPM_ROOT_DIR "/opt/hpipm")
+set(HPIPM_INCLUDE_DIR "${HPIPM_ROOT_DIR}/include")
+set(HPIPM_LIBRARY_DIR "${HPIPM_ROOT_DIR}/lib")
+
+# Check if HPIPM directories exist
+if(EXISTS "${HPIPM_INCLUDE_DIR}" AND EXISTS "${HPIPM_LIBRARY_DIR}")
+    message(STATUS "HPIPM found at ${HPIPM_ROOT_DIR}")
+    set(HPIPM_FOUND TRUE)
+    include_directories(${HPIPM_INCLUDE_DIR})
+    link_directories(${HPIPM_LIBRARY_DIR})
+else()
+    message(WARNING "HPIPM not found at ${HPIPM_ROOT_DIR}")
+    set(HPIPM_FOUND FALSE)
+endif()
+
+# OSQP tests
+ADD_EXECUTABLE(test_2agent_osqp tests/test_2agent_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_2agent_osqp qpOASES osqp)
+
+ADD_EXECUTABLE(test_4agent_osqp tests/test_4agent_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_4agent_osqp qpOASES osqp)
 
 ADD_EXECUTABLE(test_6agent_osqp tests/test_6agent_osqp.cpp)
 TARGET_LINK_LIBRARIES(test_6agent_osqp qpOASES osqp)
@@ -243,13 +275,19 @@ TARGET_LINK_LIBRARIES(test_6agent_osqp qpOASES osqp)
 ADD_EXECUTABLE(test_8agent_osqp tests/test_8agent_osqp.cpp)
 TARGET_LINK_LIBRARIES(test_8agent_osqp qpOASES osqp)
 
+ADD_EXECUTABLE(test_10agent_osqp tests/test_10agent_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_10agent_osqp qpOASES osqp)
+
+ADD_EXECUTABLE(test_14agent_osqp tests/test_14agent_osqp.cpp)
+TARGET_LINK_LIBRARIES(test_14agent_osqp qpOASES osqp)
+
 # MOSEK tests (only build if MOSEK is found)
 if(MOSEK_FOUND)
-    ADD_EXECUTABLE(test_2agent_rho25_mosek tests/test_2agent_rho25_mosek.cpp)
-    TARGET_LINK_LIBRARIES(test_2agent_rho25_mosek qpOASES mosek64)
+    ADD_EXECUTABLE(test_2agent_mosek tests/test_2agent_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_2agent_mosek qpOASES mosek64)
 
-    ADD_EXECUTABLE(test_4agent_rho25_mosek tests/test_4agent_rho25_mosek.cpp)
-    TARGET_LINK_LIBRARIES(test_4agent_rho25_mosek qpOASES mosek64)
+    ADD_EXECUTABLE(test_4agent_mosek tests/test_4agent_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_4agent_mosek qpOASES mosek64)
 
     ADD_EXECUTABLE(test_6agent_mosek tests/test_6agent_mosek.cpp)
     TARGET_LINK_LIBRARIES(test_6agent_mosek qpOASES mosek64)
@@ -257,9 +295,31 @@ if(MOSEK_FOUND)
     ADD_EXECUTABLE(test_8agent_mosek tests/test_8agent_mosek.cpp)
     TARGET_LINK_LIBRARIES(test_8agent_mosek qpOASES mosek64)
 
+    ADD_EXECUTABLE(test_10agent_mosek tests/test_10agent_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_10agent_mosek qpOASES mosek64)
+
+    ADD_EXECUTABLE(test_14agent_mosek tests/test_14agent_mosek.cpp)
+    TARGET_LINK_LIBRARIES(test_14agent_mosek qpOASES mosek64)
+
     message(STATUS "MOSEK tests will be built")
 else()
     message(STATUS "MOSEK tests will be skipped (MOSEK not found)")
+endif()
+
+# HPIPM tests (only build if HPIPM is found)
+if(HPIPM_FOUND)
+    ADD_EXECUTABLE(test_2agent_hpipm tests/test_2agent_hpipm.cpp)
+    TARGET_LINK_LIBRARIES(test_2agent_hpipm qpOASES hpipm blasfeo)
+
+    ADD_EXECUTABLE(test_4agent_hpipm tests/test_4agent_hpipm.cpp)
+    TARGET_LINK_LIBRARIES(test_4agent_hpipm qpOASES hpipm blasfeo)
+
+    ADD_EXECUTABLE(test_6agent_hpipm tests/test_6agent_hpipm.cpp)
+    TARGET_LINK_LIBRARIES(test_6agent_hpipm qpOASES hpipm blasfeo)
+
+    message(STATUS "HPIPM tests will be built")
+else()
+    message(STATUS "HPIPM tests will be skipped (HPIPM not found)")
 endif()
 
 ##

@@ -15,6 +15,7 @@ NonlinearAgentProblem makeUnicycle(const UnicycleModel& model, int_t horizon)
     NonlinearAgentProblem p;
     p.model = &model;
     p.horizon = horizon;
+    p.collisionRadius = 0.35;
     const real_t initial[] = {-2.5, 0.0, 0.0, 1.25};
     p.initialState.assign(initial, initial + 4);
     p.stateReference.assign((horizon + 1) * 4, 0.0);
@@ -50,6 +51,7 @@ NonlinearAgentProblem makeBicycle(const BicycleModel& model, int_t horizon)
     NonlinearAgentProblem p;
     p.model = &model;
     p.horizon = horizon;
+    p.collisionRadius = 0.55;
     const real_t pi = 3.14159265358979323846;
     const real_t initial[] = {2.5, 0.0, pi, 1.25, 0.0};
     p.initialState.assign(initial, initial + 5);
@@ -90,6 +92,7 @@ NonlinearAgentProblem makeQuadcopter(
     NonlinearAgentProblem p;
     p.model = &model;
     p.horizon = horizon;
+    p.collisionRadius = 0.25;
     const real_t initial[] = {
         0.0, -2.5, 0.6, 0.0, 1.25, 0.0, 0.0, 0.0, 0.0
     };
@@ -171,11 +174,12 @@ bool runMethod(
     );
     if (result.trajectories.size() != agents.size()) return false;
     std::printf(
-        "%s heterogeneous: %s, %.2f ms, distance %.3f, defects %.3e",
+        "%s heterogeneous: %s, %.2f ms, distance %.3f, margin %.3f, defects %.3e",
         method == NCM_DISTRIBUTED_ADMM ? "distributed" : "centralized",
         result.status.c_str(),
         result.statistics.solveTimeMilliseconds,
         result.statistics.minimumDistance,
+        result.statistics.minimumPairwiseClearance,
         result.statistics.maximumDynamicsDefect
     );
     bool trackingPassed = true;
@@ -196,7 +200,7 @@ bool runMethod(
     {
         std::fprintf(
             csv,
-            "%s,%d,%d,\"%s\",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g\n",
+            "%s,%d,%d,\"%s\",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g\n",
             method == NCM_DISTRIBUTED_ADMM ? "distributed_admm" : "centralized_scp",
             result.success ? 1 : 0,
             result.converged ? 1 : 0,
@@ -204,6 +208,7 @@ bool runMethod(
             result.statistics.solveTimeMilliseconds,
             result.statistics.objective,
             result.statistics.minimumDistance,
+            result.statistics.minimumPairwiseClearance,
             result.statistics.minimumObstacleDistance,
             result.statistics.minimumObstacleClearance,
             result.statistics.maximumDynamicsDefect,
@@ -221,7 +226,7 @@ bool runMethod(
     }
     return result.success
         && trackingPassed
-        && result.statistics.minimumDistance >= 0.79
+        && result.statistics.minimumPairwiseClearance >= -0.01
         && result.statistics.maximumDynamicsDefect <= 1.0e-9;
 }
 
@@ -241,7 +246,7 @@ int main(int argc, char** argv)
         std::fprintf(
             csv,
             "method,success,converged,status,solve_time_ms,objective,"
-            "minimum_distance,minimum_obstacle_distance,minimum_obstacle_clearance,"
+            "minimum_distance,minimum_pairwise_clearance,minimum_obstacle_distance,minimum_obstacle_clearance,"
             "maximum_dynamics_defect,scp_iterations,"
             "admm_iterations,qp_solves,qp_working_set_recalculations,"
             "cold_starts,matrix_hotstarts,vector_hotstarts,"

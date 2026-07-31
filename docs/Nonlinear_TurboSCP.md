@@ -17,6 +17,12 @@ linear `TurboADMM` API.
 - A single problem may mix state, control, and position dimensions. Collision
   geometry is evaluated in the maximum world dimension; 2D positions are
   embedded at `z = 0` when a 3D model is present.
+- `problem.collisionRadius` defines each agent's circular/spherical footprint.
+  Pairwise separation is the sum of the two radii. A negative radius uses
+  `options.safetyDistance / 2`, preserving the previous global-distance API.
+- Preflight validation rejects colliding fixed starts and requested goal
+  references with agent, obstacle or pair, and stage identifiers. Failed SCP
+  geometry reports the worst conflict and detects overlapping corridor margins.
 - `ConvexPolygonObstacle` supplies ordered x-y vertices to the nonlinear
   solver. If a reference intersects an obstacle, the solver deterministically
   selects the lower-cost bypass side and uses supporting planes along the
@@ -74,25 +80,26 @@ cmake --build build-nonlinear --target nonlinear_heterogeneous_benchmark
 
 The output is `build-nonlinear/heterogeneous_benchmark.csv`. It records
 convergence and feasibility separately, wall time, objective, raw pair and
-obstacle distance, per-agent obstacle-clearance margin, nonlinear dynamics
-defect, iteration and QP work counts, hotstart counts, and terminal tracking
-errors.
+obstacle distance, radius-sum pairwise margin, per-agent obstacle-clearance
+margin, nonlinear dynamics defect, iteration and QP work counts, hotstart
+counts, and terminal tracking errors.
 
 The deterministic tests verify:
 
 1. analytic unicycle Jacobians against finite differences;
 2. affine Riccati dynamics and control stationarity;
-3. distributed and centralized nonlinear two-agent safety, tracking,
-   nonlinear dynamics defects, solver work, and hotstart counters;
+3. distributed and centralized nonlinear two-agent radius-sum safety,
+   backward-compatible global-distance fallback, invalid-start diagnostics,
+   tracking, nonlinear dynamics defects, solver work, and hotstart counters;
 4. analytic bicycle and reduced-order quadcopter Jacobians against finite
    differences;
 5. one heterogeneous problem containing a unicycle, bicycle, and 3D
    quadcopter for both distributed ADMM and centralized SCP;
 6. convex-polygon avoidance for distributed and centralized SCP, invalid
-   polygon rejection, per-agent clearance in mixed unicycle-quadcopter
-   avoidance of a vertically extruded polygon, zero-seed avoidance of two
-   intersecting polygons, and a 0.70 m polygon corridor with 0.10 m residual
-   width after clearance inflation.
+   polygon rejection, endpoint and insufficient-passage diagnostics, per-agent
+   clearance in mixed unicycle-quadcopter avoidance of a vertically extruded
+   polygon, zero-seed avoidance of two intersecting polygons, and a 0.70 m
+   polygon corridor with 0.10 m residual width after clearance inflation.
 
 ## RA-L benchmark completion gates
 

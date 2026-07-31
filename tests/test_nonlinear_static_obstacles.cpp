@@ -219,9 +219,10 @@ bool runHeterogeneous(
         options
     );
     std::printf(
-        "heterogeneous obstacle: %s, pair %.3f, distance %.3f, margin %.3f, defect %.3e\n",
+        "heterogeneous obstacle: %s, pair %.3f, pair margin %.3f, distance %.3f, obstacle margin %.3f, defect %.3e\n",
         result.status.c_str(),
         result.statistics.minimumDistance,
+        result.statistics.minimumPairwiseClearance,
         result.statistics.minimumObstacleDistance,
         result.statistics.minimumObstacleClearance,
         result.statistics.maximumDynamicsDefect
@@ -229,6 +230,7 @@ bool runHeterogeneous(
     return result.success
         && result.trajectories.size() == agents.size()
         && result.statistics.minimumDistance >= 0.79
+        && result.statistics.minimumPairwiseClearance >= -0.01
         && result.statistics.minimumObstacleDistance >= 0.29
         && result.statistics.minimumObstacleClearance >= -0.01
         && result.statistics.maximumDynamicsDefect <= 1.0e-9
@@ -263,6 +265,66 @@ bool invalidPolygonIsRejected(
 
 }
 
+bool invalidEndpointGeometryIsRejected(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<ConvexPolygonObstacle>& obstacles
+)
+{
+    std::vector<NonlinearAgentProblem> invalidInitial = agents;
+    invalidInitial[0].initialState[0] = 0.0;
+    const NonlinearTurboResult initialResult = NonlinearTurboADMM().solve(
+        invalidInitial,
+        obstacles
+    );
+    if (initialResult.success
+        || initialResult.status.find("agent 0 initial state")
+            == std::string::npos
+        || initialResult.status.find("obstacle 0") == std::string::npos
+        || initialResult.status.find("stage 0") == std::string::npos)
+        return false;
+
+    std::vector<NonlinearAgentProblem> invalidGoal = agents;
+    const int_t nx = invalidGoal[0].model->stateDimension();
+    invalidGoal[0].stateReference[invalidGoal[0].horizon * nx] = 0.0;
+    invalidGoal[0].stateReference[invalidGoal[0].horizon * nx + 1] = 0.0;
+    const NonlinearTurboResult goalResult = NonlinearTurboADMM().solve(
+        invalidGoal,
+        obstacles
+    );
+    return !goalResult.success
+        && goalResult.status.find("agent 0 goal reference")
+            != std::string::npos
+        && goalResult.status.find("obstacle 0") != std::string::npos;
+}
+
+bool insufficientPassageIsDiagnosed(
+    const std::vector<NonlinearAgentProblem>& agents
+)
+{
+    std::vector<NonlinearAgentProblem> constrained = agents;
+    constrained[0].stateLowerBounds[1] = -0.1;
+    constrained[0].stateUpperBounds[1] = 0.1;
+    std::vector<ConvexPolygonObstacle> blocked = makeNarrowPassage();
+    blocked[0].vertices[5] = -0.25;
+    blocked[0].vertices[7] = -0.25;
+    blocked[1].vertices[1] = 0.25;
+    blocked[1].vertices[3] = 0.25;
+    NonlinearTurboOptions options;
+    options.obstacleSafetyDistance = 0.3;
+    options.maxScpIterations = 4;
+    const NonlinearTurboResult result = NonlinearTurboADMM().solve(
+        constrained,
+        blocked,
+        options
+    );
+    std::printf("blocked passage diagnostic: %s\n", result.status.c_str());
+    return !result.success
+        && result.status.find("agent 0") != std::string::npos
+        && result.status.find("obstacles 0 and 1") != std::string::npos
+        && result.status.find("passage may be too narrow")
+            != std::string::npos;
+}
+
 int main()
 {
     const int_t horizon = 24;
@@ -287,6 +349,16 @@ int main()
     if (!runHeterogeneous(heterogeneousAgents, obstacles)) return 1;
     std::vector<ConvexPolygonObstacle> multipleObstacles;
     multipleObstacles.push_back(translatedObstacle(-1.0, 0.0));
+    if (!invalidEndpointGeometryIsRejected(agents, obstacles))
+    {
+        std::fprintf(stderr, "invalid endpoint geometry was not rejected\n");
+        return 1;
+    }
+    if (!insufficientPassageIsDiagnosed(agents))
+    {
+        std::fprintf(stderr, "insufficient passage was not diagnosed\n");
+        return 1;
+    }
     multipleObstacles.push_back(translatedObstacle(1.0, 0.0));
     if (!runMethod(
             NCM_DISTRIBUTED_ADMM, agents, multipleObstacles)) return 1;

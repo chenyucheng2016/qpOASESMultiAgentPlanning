@@ -1,6 +1,7 @@
 #include <qpOASES/NonlinearTurboADMM.hpp>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include <vector>
 USING_NAMESPACE_QPOASES
 
@@ -10,6 +11,7 @@ NonlinearAgentProblem makeAgent(const UnicycleModel& model, bool reverse)
 {
     const int_t N = 30;
     NonlinearAgentProblem p; p.model = &model; p.horizon = N;
+    p.collisionRadius = reverse ? 0.85 : 0.35;
     p.initialState.resize(4); p.initialState[0] = reverse ? 4.0 : -4.0;
     p.initialState[1] = 0.0; p.initialState[2] = reverse ? 3.14159265358979323846 : 0.0;
     p.initialState[3] = 1.4;
@@ -53,14 +55,30 @@ bool runMethod(NonlinearCoordinationMethod method, const std::vector<NonlinearAg
     NonlinearTurboADMM solver; const NonlinearTurboResult result = solver.solve(agents, options);
     const real_t e0 = finalError(agents[0], result.trajectories[0]);
     const real_t e1 = finalError(agents[1], result.trajectories[1]);
-    std::printf("%s: %s, %.2f ms, SCP %d, ADMM %d, QPs %d, distance %.3f, errors %.3f/%.3f\n",
+    std::printf("%s: %s, %.2f ms, SCP %d, ADMM %d, QPs %d, distance %.3f, margin %.3f, errors %.3f/%.3f\n",
         method == NCM_DISTRIBUTED_ADMM ? "distributed" : "centralized", result.status.c_str(),
         result.statistics.solveTimeMilliseconds, result.statistics.scpIterations,
         result.statistics.admmIterations, result.statistics.qpSolves,
-        result.statistics.minimumDistance, e0, e1);
+        result.statistics.minimumDistance, result.statistics.minimumPairwiseClearance, e0, e1);
     return result.success && result.statistics.maximumDynamicsDefect <= 1.0e-10
+        && result.statistics.minimumDistance >= 1.19
+        && result.statistics.minimumPairwiseClearance >= -0.01
         && e0 <= 2.0 && e1 <= 2.0
         && (method != NCM_DISTRIBUTED_ADMM || result.statistics.vectorHotstarts > 0);
+}
+
+bool invalidInitialPairIsRejected(
+    const std::vector<NonlinearAgentProblem>& agents
+)
+{
+    std::vector<NonlinearAgentProblem> invalid = agents;
+    invalid[1].initialState[0] = invalid[0].initialState[0];
+    invalid[1].initialState[1] = invalid[0].initialState[1];
+    const NonlinearTurboResult result = NonlinearTurboADMM().solve(invalid);
+    return !result.success
+        && result.status.find("agents 0 and 1") != std::string::npos
+        && result.status.find("initial states") != std::string::npos
+        && result.status.find("stage 0") != std::string::npos;
 }
 }
 
@@ -69,5 +87,7 @@ int main()
     UnicycleModel model(0.2);
     std::vector<NonlinearAgentProblem> agents;
     agents.push_back(makeAgent(model, false)); agents.push_back(makeAgent(model, true));
-    return runMethod(NCM_DISTRIBUTED_ADMM, agents) && runMethod(NCM_CENTRALIZED_SCP, agents) ? 0 : 1;
+    return invalidInitialPairIsRejected(agents)
+        && runMethod(NCM_DISTRIBUTED_ADMM, agents)
+        && runMethod(NCM_CENTRALIZED_SCP, agents) ? 0 : 1;
 }

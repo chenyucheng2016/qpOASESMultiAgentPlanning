@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <sstream>
 
 BEGIN_NAMESPACE_QPOASES
 
@@ -24,6 +25,7 @@ struct AgentQp
 struct PairData
 {
     int_t first, second;
+    real_t safetyDistance;
     std::vector<real_t> normal, firstPosition, secondPosition;
     std::vector<real_t> firstAuxiliary, secondAuxiliary;
     std::vector<real_t> firstDual, secondDual;
@@ -391,6 +393,24 @@ real_t obstacleDistanceForAgent(
         ? agent.obstacleSafetyDistance : options.obstacleSafetyDistance;
 }
 
+real_t collisionRadiusForAgent(
+    const NonlinearAgentProblem& agent,
+    const NonlinearTurboOptions& options
+)
+{
+    return agent.collisionRadius >= 0.0
+        ? agent.collisionRadius : 0.5 * options.safetyDistance;
+}
+
+real_t pairSafetyDistance(
+    const NonlinearAgentProblem& first,
+    const NonlinearAgentProblem& second,
+    const NonlinearTurboOptions& options
+)
+{
+    return collisionRadiusForAgent(first, options)
+        + collisionRadiusForAgent(second, options);
+}
 void configureSolver(SQProblem& solver)
 {
     Options options;
@@ -407,6 +427,12 @@ bool validateProblems(const std::vector<NonlinearAgentProblem>& agents, std::str
     {
         const NonlinearAgentProblem& p = agents[a];
         if (!p.model) { error = "each agent requires a nonlinear model"; return false; }
+        if (!std::isfinite(p.collisionRadius)
+            || !std::isfinite(p.obstacleSafetyDistance))
+        {
+            error = "agent collision clearances must be finite";
+            return false;
+        }
         const int_t nx = p.model->stateDimension();
         const int_t nu = p.model->controlDimension();
         if (p.horizon <= 0 || p.horizon != N
@@ -668,7 +694,7 @@ std::vector<PairData> buildPairs(
     const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
     int_t np,
-    real_t safetyDistance)
+    const NonlinearTurboOptions& options)
 {
     std::vector<PairData> pairs;
     const int_t N = agents[0].horizon;
@@ -676,6 +702,7 @@ std::vector<PairData> buildPairs(
     for (std::size_t second = first + 1; second < agents.size(); ++second)
     {
         PairData pair; pair.first = static_cast<int_t>(first); pair.second = static_cast<int_t>(second);
+        pair.safetyDistance = pairSafetyDistance(agents[first], agents[second], options);
         const int_t count = (N + 1) * np;
         pair.normal.assign(count, 0.0);
         pair.firstPosition.assign(count, 0.0); pair.secondPosition.assign(count, 0.0);
@@ -716,7 +743,7 @@ std::vector<PairData> buildPairs(
             real_t signedDistance = 0.0;
             for (int_t i = 0; i < np; ++i)
                 signedDistance += pair.normal[k * np + i] * (pf[i] - ps[i]);
-            const real_t correction = 0.5 * std::max(0.0, safetyDistance - signedDistance);
+            const real_t correction = 0.5 * std::max(0.0, pair.safetyDistance - signedDistance);
             for (int_t i = 0; i < np; ++i)
             {
                 pair.firstAuxiliary[k * np + i] = pf[i] + correction * pair.normal[k * np + i];
@@ -868,7 +895,7 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
                     signedDistance += pair.normal[x]
                         * ((pair.firstPosition[x] + pair.firstDual[x]) - (pair.secondPosition[x] + pair.secondDual[x]));
                 }
-                const real_t correction = 0.5 * std::max(0.0, options.safetyDistance - signedDistance);
+                const real_t correction = 0.5 * std::max(0.0, pair.safetyDistance - signedDistance);
                 real_t p1 = 0.0, p2 = 0.0, d1 = 0.0, d2 = 0.0;
                 for (int_t i = 0; i < np; ++i)
                 {
@@ -947,7 +974,7 @@ bool solveCentralized(const std::vector<NonlinearAgentProblem>& agents,
                     A[rowOffset * nV + secondState + j] -= normal[i] * secondC[i * second.nx + j];
             real_t affine = 0.0;
             for (int_t i = 0; i < first.np; ++i) affine += normal[i] * (firstD[i] - secondD[i]);
-            lbA[rowOffset] = options.safetyDistance - affine; ubA[rowOffset] = INFTY; ++rowOffset;
+            lbA[rowOffset] = pair.safetyDistance - affine; ubA[rowOffset] = INFTY; ++rowOffset;
         }
     }
 
@@ -1043,6 +1070,51 @@ real_t minimumDistance(const std::vector<NonlinearAgentProblem>& agents,
     return minimum;
 }
 
+real_t minimumPairwiseClearance(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<std::vector<real_t> >& states,
+    const NonlinearTurboOptions& options
+)
+{
+    if (agents.size() < 2) return INFTY;
+    real_t minimum = INFTY;
+    const int_t np = worldPositionDimension(agents);
+    for (std::size_t first = 0; first < agents.size(); ++first)
+    for (std::size_t second = first + 1; second < agents.size(); ++second)
+    {
+        const int_t nxf = agents[first].model->stateDimension();
+        const int_t nxs = agents[second].model->stateDimension();
+        const real_t requiredDistance = pairSafetyDistance(
+            agents[first],
+            agents[second],
+            options
+        );
+        std::vector<real_t> pf(np, 0.0), ps(np, 0.0);
+        for (int_t k = 0; k <= agents[first].horizon; ++k)
+        {
+            worldPosition(
+                *agents[first].model,
+                &states[first][k * nxf],
+                np,
+                &pf[0]
+            );
+            worldPosition(
+                *agents[second].model,
+                &states[second][k * nxs],
+                np,
+                &ps[0]
+            );
+            real_t squared = 0.0;
+            for (int_t i = 0; i < np; ++i)
+                squared += (pf[i] - ps[i]) * (pf[i] - ps[i]);
+            minimum = std::min(
+                minimum,
+                std::sqrt(squared) - requiredDistance
+            );
+        }
+    }
+    return minimum;
+}
 real_t minimumObstacleDistance(
     const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
@@ -1118,6 +1190,210 @@ real_t minimumObstacleClearance(
     return minimum;
 }
 
+bool validateEndpointGeometry(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
+    const NonlinearTurboOptions& options,
+    std::string& error
+)
+{
+    const int_t worldDimension = worldPositionDimension(agents);
+    for (int_t endpoint = 0; endpoint < 2; ++endpoint)
+    {
+        for (std::size_t a = 0; a < agents.size(); ++a)
+        {
+            const NonlinearAgentProblem& agent = agents[a];
+            const int_t nx = agent.model->stateDimension();
+            const real_t* state = endpoint == 0
+                ? &agent.initialState[0]
+                : &agent.stateReference[agent.horizon * nx];
+            const int_t np = agent.model->positionDimension();
+            std::vector<real_t> position(np, 0.0);
+            agent.model->position(state, &position[0]);
+            const real_t requiredDistance = obstacleDistanceForAgent(
+                agent,
+                options
+            );
+            for (std::size_t obstacle = 0;
+                 obstacle < obstacles.size();
+                 ++obstacle)
+            {
+                const real_t margin = projectToPolygon(
+                    position[0],
+                    position[1],
+                    obstacles[obstacle]
+                ).signedDistance - requiredDistance;
+                if (margin < -options.collisionTolerance)
+                {
+                    std::ostringstream message;
+                    message << "agent " << a << " "
+                        << (endpoint == 0 ? "initial state" : "goal reference")
+                        << " violates obstacle " << obstacle
+                        << " clearance at stage "
+                        << (endpoint == 0 ? 0 : agent.horizon);
+                    error = message.str();
+                    return false;
+                }
+            }
+        }
+
+        for (std::size_t first = 0; first < agents.size(); ++first)
+        for (std::size_t second = first + 1; second < agents.size(); ++second)
+        {
+            const NonlinearAgentProblem& firstAgent = agents[first];
+            const NonlinearAgentProblem& secondAgent = agents[second];
+            const int_t firstNx = firstAgent.model->stateDimension();
+            const int_t secondNx = secondAgent.model->stateDimension();
+            const real_t* firstState = endpoint == 0
+                ? &firstAgent.initialState[0]
+                : &firstAgent.stateReference[firstAgent.horizon * firstNx];
+            const real_t* secondState = endpoint == 0
+                ? &secondAgent.initialState[0]
+                : &secondAgent.stateReference[secondAgent.horizon * secondNx];
+            std::vector<real_t> firstPosition(worldDimension, 0.0);
+            std::vector<real_t> secondPosition(worldDimension, 0.0);
+            worldPosition(
+                *firstAgent.model,
+                firstState,
+                worldDimension,
+                &firstPosition[0]
+            );
+            worldPosition(
+                *secondAgent.model,
+                secondState,
+                worldDimension,
+                &secondPosition[0]
+            );
+            real_t squaredDistance = 0.0;
+            for (int_t i = 0; i < worldDimension; ++i)
+                squaredDistance +=
+                    (firstPosition[i] - secondPosition[i])
+                    * (firstPosition[i] - secondPosition[i]);
+            const real_t margin = std::sqrt(squaredDistance)
+                - pairSafetyDistance(firstAgent, secondAgent, options);
+            if (margin < -options.collisionTolerance)
+            {
+                std::ostringstream message;
+                message << "agents " << first << " and " << second << " "
+                    << (endpoint == 0 ? "initial states" : "goal references")
+                    << " violate pairwise clearance at stage "
+                    << (endpoint == 0 ? 0 : firstAgent.horizon);
+                error = message.str();
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::string geometryDiagnostic(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<std::vector<real_t> >& states,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
+    const NonlinearTurboOptions& options
+)
+{
+    real_t worstMargin = INFTY;
+    bool worstIsPair = false;
+    std::size_t worstFirst = 0, worstSecond = 0;
+    int_t worstStage = 0;
+    for (std::size_t a = 0; a < agents.size(); ++a)
+    {
+        const int_t nx = agents[a].model->stateDimension();
+        const int_t np = agents[a].model->positionDimension();
+        const real_t requiredDistance = obstacleDistanceForAgent(
+            agents[a],
+            options
+        );
+        std::vector<real_t> position(np, 0.0);
+        for (int_t k = 0; k <= agents[a].horizon; ++k)
+        {
+            agents[a].model->position(&states[a][k * nx], &position[0]);
+            real_t firstViolation = INFTY, secondViolation = INFTY;
+            std::size_t firstObstacle = 0, secondObstacle = 0;
+            for (std::size_t obstacle = 0;
+                 obstacle < obstacles.size();
+                 ++obstacle)
+            {
+                const real_t margin = projectToPolygon(
+                    position[0], position[1], obstacles[obstacle]
+                ).signedDistance - requiredDistance;
+                if (margin < firstViolation)
+                {
+                    secondViolation = firstViolation;
+                    secondObstacle = firstObstacle;
+                    firstViolation = margin;
+                    firstObstacle = obstacle;
+                }
+                else if (margin < secondViolation)
+                {
+                    secondViolation = margin;
+                    secondObstacle = obstacle;
+                }
+                if (margin < worstMargin)
+                {
+                    worstMargin = margin;
+                    worstIsPair = false;
+                    worstFirst = a;
+                    worstSecond = obstacle;
+                    worstStage = k;
+                }
+            }
+            if (secondViolation < -options.collisionTolerance)
+            {
+                std::ostringstream message;
+                message << "agent " << a
+                    << " overlaps clearance regions of obstacles "
+                    << firstObstacle << " and " << secondObstacle
+                    << " at stage " << k
+                    << "; passage may be too narrow";
+                return message.str();
+            }
+        }
+    }
+
+    const int_t worldDimension = worldPositionDimension(agents);
+    for (std::size_t first = 0; first < agents.size(); ++first)
+    for (std::size_t second = first + 1; second < agents.size(); ++second)
+    {
+        const int_t firstNx = agents[first].model->stateDimension();
+        const int_t secondNx = agents[second].model->stateDimension();
+        std::vector<real_t> firstPosition(worldDimension, 0.0);
+        std::vector<real_t> secondPosition(worldDimension, 0.0);
+        for (int_t k = 0; k <= agents[first].horizon; ++k)
+        {
+            worldPosition(*agents[first].model, &states[first][k * firstNx],
+                worldDimension, &firstPosition[0]);
+            worldPosition(*agents[second].model, &states[second][k * secondNx],
+                worldDimension, &secondPosition[0]);
+            real_t squaredDistance = 0.0;
+            for (int_t i = 0; i < worldDimension; ++i)
+                squaredDistance += (firstPosition[i] - secondPosition[i])
+                    * (firstPosition[i] - secondPosition[i]);
+            const real_t margin = std::sqrt(squaredDistance)
+                - pairSafetyDistance(agents[first], agents[second], options);
+            if (margin < worstMargin)
+            {
+                worstMargin = margin;
+                worstIsPair = true;
+                worstFirst = first;
+                worstSecond = second;
+                worstStage = k;
+            }
+        }
+    }
+
+    std::ostringstream message;
+    if (worstMargin >= -options.collisionTolerance)
+        return "nominal geometry is feasible; inspect dynamics and bounds";
+    if (worstIsPair)
+        message << "agents " << worstFirst << " and " << worstSecond
+            << " violate pairwise clearance at stage " << worstStage;
+    else
+        message << "agent " << worstFirst << " violates obstacle "
+            << worstSecond << " clearance at stage " << worstStage;
+    return message.str();
+}
 real_t merit(const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
     const std::vector<std::vector<real_t> >& controls,
@@ -1125,9 +1401,7 @@ real_t merit(const std::vector<NonlinearAgentProblem>& agents,
     const NonlinearTurboOptions& options)
 {
     const real_t pairViolation = std::max(
-        0.0,
-        options.safetyDistance - minimumDistance(agents, states)
-    );
+        0.0, -minimumPairwiseClearance(agents, states, options));
     const real_t obstacleViolation = std::max(
         0.0, -minimumObstacleClearance(agents, states, obstacles, options)
     );
@@ -1160,7 +1434,8 @@ real_t dynamicsDefect(const std::vector<NonlinearAgentProblem>& agents,
 } // anonymous namespace
 
 NonlinearAgentProblem::NonlinearAgentProblem()
-    : model(0), horizon(0), obstacleSafetyDistance(-1.0) {}
+    : model(0), horizon(0), collisionRadius(-1.0),
+      obstacleSafetyDistance(-1.0) {}
 
 NonlinearTurboOptions::NonlinearTurboOptions()
     : coordinationMethod(NCM_DISTRIBUTED_ADMM), maxScpIterations(8), maxAdmmIterations(40),
@@ -1172,7 +1447,8 @@ NonlinearTurboOptions::NonlinearTurboOptions()
 NonlinearTurboStatistics::NonlinearTurboStatistics()
     : scpIterations(0), admmIterations(0), qpSolves(0), qpWorkingSetRecalculations(0),
       coldStarts(0), matrixHotstarts(0), vectorHotstarts(0), primalResidual(0.0),
-      dualResidual(0.0), minimumDistance(INFTY), minimumObstacleDistance(INFTY),
+      dualResidual(0.0), minimumDistance(INFTY), minimumPairwiseClearance(INFTY),
+      minimumObstacleDistance(INFTY),
       minimumObstacleClearance(INFTY),
       maximumDynamicsDefect(0.0), objective(0.0), solveTimeMilliseconds(0.0) {}
 
@@ -1204,10 +1480,20 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         return result;
     }
     if (options.maxScpIterations <= 0 || options.maxAdmmIterations <= 0
-        || options.rho <= 0.0 || options.safetyDistance < 0.0
-        || options.obstacleSafetyDistance < 0.0)
+        || !std::isfinite(options.rho) || options.rho <= 0.0
+        || !std::isfinite(options.safetyDistance)
+        || options.safetyDistance < 0.0
+        || !std::isfinite(options.obstacleSafetyDistance)
+        || options.obstacleSafetyDistance < 0.0
+        || !std::isfinite(options.collisionTolerance)
+        || options.collisionTolerance < 0.0)
     {
         result.status = "invalid solver options"; return result;
+    }
+    if (!validateEndpointGeometry(agents, obstacles, options, validationError))
+    {
+        result.status = validationError;
+        return result;
     }
 
     std::vector<std::vector<real_t> > nominalControls(agents.size());
@@ -1242,12 +1528,18 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             agents,
             nominalStates,
             positionDimension,
-            options.safetyDistance
+            options
         );
         const bool solved = options.coordinationMethod == NCM_DISTRIBUTED_ADMM
             ? solveDistributed(agents, outer, options, distributedSolvers, pairs, qps, result.statistics)
             : solveCentralized(agents, pairs, outer, options, centralContext, qps, result.statistics);
-        if (!solved) { qpFailed = true; result.status = "a convex SCP subproblem failed"; break; }
+        if (!solved)
+        {
+            qpFailed = true;
+            result.status = "a convex SCP subproblem failed: "
+                + geometryDiagnostic(agents, nominalStates, obstacles, options);
+            break;
+        }
 
         std::vector<std::vector<real_t> > qpControls(agents.size());
         for (std::size_t a = 0; a < agents.size(); ++a)
@@ -1303,7 +1595,7 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 maximumStep = std::max(maximumStep, std::fabs(bestControls[a][i] - nominalControls[a][i]));
         nominalStates.swap(bestStates); nominalControls.swap(bestControls); activeQps.swap(qps);
         result.statistics.scpIterations = outer + 1;
-        const real_t distance = minimumDistance(agents, nominalStates);
+        const real_t pairwiseClearance = minimumPairwiseClearance(agents, nominalStates, options);
         const real_t obstacleClearance = minimumObstacleClearance(
             agents,
             nominalStates,
@@ -1311,7 +1603,7 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             options
         );
         if ((maximumStep <= options.scpStepTolerance || bestAlpha == 0.0)
-            && distance >= options.safetyDistance - options.collisionTolerance
+            && pairwiseClearance >= -options.collisionTolerance
             && obstacleClearance >= -options.collisionTolerance)
         {
             result.converged = true; break;
@@ -1326,6 +1618,11 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
     }
     result.statistics.minimumDistance = minimumDistance(agents, nominalStates);
     result.statistics.maximumDynamicsDefect = dynamicsDefect(agents, nominalStates, nominalControls);
+    result.statistics.minimumPairwiseClearance = minimumPairwiseClearance(
+        agents,
+        nominalStates,
+        options
+    );
     result.statistics.minimumObstacleDistance = minimumObstacleDistance(
         agents,
         nominalStates,
@@ -1338,13 +1635,13 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         options
     );
     result.statistics.objective = trajectoryCost(agents, nominalStates, nominalControls);
-    result.success = !qpFailed && result.statistics.minimumDistance
-        >= options.safetyDistance - options.collisionTolerance
+    result.success = !qpFailed && result.statistics.minimumPairwiseClearance >= -options.collisionTolerance
         && result.statistics.minimumObstacleClearance >= -options.collisionTolerance;
     if (result.status.empty())
         result.status = result.converged ? "converged" : (result.success
             ? "maximum SCP iterations reached with a feasible trajectory"
-            : "trajectory remains collision-infeasible");
+            : "trajectory remains collision-infeasible: "
+                + geometryDiagnostic(agents, nominalStates, obstacles, options));
     const std::chrono::duration<double, std::milli> elapsed = std::chrono::steady_clock::now() - start;
     result.statistics.solveTimeMilliseconds = static_cast<real_t>(elapsed.count());
     return result;

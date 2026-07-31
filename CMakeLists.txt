@@ -235,6 +235,12 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
         NAME heterogeneous_three_agent
         COMMAND test_heterogeneous_three_agent
     )
+    ADD_EXECUTABLE(
+        test_nonlinear_static_obstacles
+        tests/test_nonlinear_static_obstacles.cpp
+    )
+    TARGET_LINK_LIBRARIES(test_nonlinear_static_obstacles qpOASES)
+    add_test(NAME nonlinear_static_obstacles COMMAND test_nonlinear_static_obstacles)
     ADD_CUSTOM_TARGET(nonlinear_heterogeneous_benchmark
         COMMAND $<TARGET_FILE:test_heterogeneous_three_agent>
             --csv ${CMAKE_BINARY_DIR}/heterogeneous_benchmark.csv

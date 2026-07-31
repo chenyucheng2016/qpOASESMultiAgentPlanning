@@ -196,7 +196,7 @@ bool runMethod(
     {
         std::fprintf(
             csv,
-            "%s,%d,%d,\"%s\",%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g\n",
+            "%s,%d,%d,\"%s\",%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g\n",
             method == NCM_DISTRIBUTED_ADMM ? "distributed_admm" : "centralized_scp",
             result.success ? 1 : 0,
             result.converged ? 1 : 0,
@@ -204,6 +204,7 @@ bool runMethod(
             result.statistics.solveTimeMilliseconds,
             result.statistics.objective,
             result.statistics.minimumDistance,
+            result.statistics.minimumObstacleDistance,
             result.statistics.maximumDynamicsDefect,
             result.statistics.scpIterations,
             result.statistics.admmIterations,
@@ -239,7 +240,8 @@ int main(int argc, char** argv)
         std::fprintf(
             csv,
             "method,success,converged,status,solve_time_ms,objective,"
-            "minimum_distance,maximum_dynamics_defect,scp_iterations,"
+            "minimum_distance,minimum_obstacle_distance,"
+            "maximum_dynamics_defect,scp_iterations,"
             "admm_iterations,qp_solves,qp_working_set_recalculations,"
             "cold_starts,matrix_hotstarts,vector_hotstarts,"
             "unicycle_final_error,bicycle_final_error,quadcopter_final_error\n"

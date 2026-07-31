@@ -13,6 +13,16 @@ enum NonlinearCoordinationMethod
     NCM_CENTRALIZED_SCP
 };
 
+/**
+ * Static convex polygon in the world x-y plane. Vertices are stored as
+ * [x0, y0, x1, y1, ...] in clockwise or counter-clockwise boundary order.
+ * For 3D agents the polygon is treated as a vertically extruded prism.
+ */
+struct ConvexPolygonObstacle
+{
+    std::vector<real_t> vertices;
+};
+
 struct NonlinearAgentProblem
 {
     const NonlinearModel* model;
@@ -40,6 +50,7 @@ struct NonlinearTurboOptions
     int_t maxLineSearchSteps;
     real_t rho;
     real_t safetyDistance;
+    real_t obstacleSafetyDistance;
     real_t controlTrustRegion;
     real_t admmPrimalTolerance;
     real_t admmDualTolerance;
@@ -67,6 +78,7 @@ struct NonlinearTurboStatistics
     real_t primalResidual;
     real_t dualResidual;
     real_t minimumDistance;
+    real_t minimumObstacleDistance;
     real_t maximumDynamicsDefect;
     real_t objective;
     real_t solveTimeMilliseconds;
@@ -83,12 +95,17 @@ struct NonlinearTurboResult
     NonlinearTurboResult();
 };
 
-/** Nonlinear all-to-all collision avoidance with SCP and qpOASES hotstarts. */
+/** Nonlinear agent-agent and convex-polygon avoidance with SCP hotstarts. */
 class NonlinearTurboADMM
 {
 public:
     NonlinearTurboResult solve(
         const std::vector<NonlinearAgentProblem>& agents,
+        const NonlinearTurboOptions& options = NonlinearTurboOptions()
+    ) const;
+    NonlinearTurboResult solve(
+        const std::vector<NonlinearAgentProblem>& agents,
+        const std::vector<ConvexPolygonObstacle>& obstacles,
         const NonlinearTurboOptions& options = NonlinearTurboOptions()
     ) const;
 };

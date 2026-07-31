@@ -17,6 +17,10 @@ linear `TurboADMM` API.
 - A single problem may mix state, control, and position dimensions. Collision
   geometry is evaluated in the maximum world dimension; 2D positions are
   embedded at `z = 0` when a 3D model is present.
+- `ConvexPolygonObstacle` supplies ordered x-y vertices to the nonlinear
+  solver. Each SCP stage uses the separating plane at the nominal point's
+  closest polygon point and enforces `obstacleSafetyDistance`.
+- Polygon obstacles are treated as vertical prisms for 3D agents.
 - `solveStageVaryingLqr` solves affine, time-varying finite-horizon LQR and
   supplies a dynamics-feasible primal warm start.
 - `NCM_DISTRIBUTED_ADMM` uses one `SQProblem` per agent, vector hotstarts
@@ -29,6 +33,20 @@ At stage `k`, collision convexification fixes the nominal relative-position
 normal `n_k` and enforces `n_k' (p_i - p_j) >= d_safe`. The distributed
 coordinator projects auxiliary positions onto this half-space. Its dual
 residual is `rho * ||v - v_previous||`, not a copy of the primal residual.
+
+Static obstacles are passed through the overload:
+
+```cpp
+ConvexPolygonObstacle obstacle;
+obstacle.vertices = {-0.8, 0.0, 0.0, -0.5, 0.8, 0.0, 0.0, 0.5};
+std::vector<ConvexPolygonObstacle> obstacles(1, obstacle);
+NonlinearTurboResult result = solver.solve(agents, obstacles, options);
+```
+
+Clockwise and counter-clockwise vertex order are accepted; concave, degenerate,
+or unordered polygons are rejected. Because the collision-free exterior is
+nonconvex, the initial controls should seed the intended homotopy around an
+obstacle.
 
 ## Build and verify
 
@@ -64,7 +82,10 @@ The deterministic tests verify:
 4. analytic bicycle and reduced-order quadcopter Jacobians against finite
    differences;
 5. one heterogeneous problem containing a unicycle, bicycle, and 3D
-   quadcopter for both distributed ADMM and centralized SCP.
+   quadcopter for both distributed ADMM and centralized SCP;
+6. convex-polygon avoidance for distributed and centralized SCP, invalid
+   polygon rejection, and mixed unicycle-quadcopter avoidance of a vertically
+   extruded polygon.
 
 ## RA-L benchmark completion gates
 

@@ -47,6 +47,143 @@ struct CentralContext
     ~CentralContext() { delete solver; }
 };
 
+struct PolygonProjection
+{
+    real_t closest[2];
+    real_t normal[2];
+    real_t signedDistance;
+};
+
+real_t polygonAreaTwice(const ConvexPolygonObstacle& obstacle)
+{
+    real_t area = 0.0;
+    const std::size_t count = obstacle.vertices.size() / 2;
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const std::size_t next = (i + 1) % count;
+        area += obstacle.vertices[2 * i] * obstacle.vertices[2 * next + 1]
+            - obstacle.vertices[2 * i + 1] * obstacle.vertices[2 * next];
+    }
+    return area;
+}
+
+bool validateObstacles(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
+    std::string& error
+)
+{
+    if (obstacles.empty()) return true;
+    for (std::size_t a = 0; a < agents.size(); ++a)
+        if (agents[a].model->positionDimension() < 2)
+        {
+            error = "polygon obstacles require two-dimensional position outputs";
+            return false;
+        }
+    for (std::size_t obstacleIndex = 0;
+         obstacleIndex < obstacles.size();
+         ++obstacleIndex)
+    {
+        const ConvexPolygonObstacle& obstacle = obstacles[obstacleIndex];
+        if (obstacle.vertices.size() < 6 || obstacle.vertices.size() % 2 != 0)
+        {
+            error = "each obstacle requires at least three x-y vertices";
+            return false;
+        }
+        const real_t area = polygonAreaTwice(obstacle);
+        if (!std::isfinite(area) || std::fabs(area) <= 1.0e-12)
+        {
+            error = "obstacle vertices must define a finite nonzero-area polygon";
+            return false;
+        }
+        const real_t orientation = area > 0.0 ? 1.0 : -1.0;
+        const std::size_t count = obstacle.vertices.size() / 2;
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const std::size_t next = (i + 1) % count;
+            const std::size_t after = (i + 2) % count;
+            const real_t ax = obstacle.vertices[2 * i];
+            const real_t ay = obstacle.vertices[2 * i + 1];
+            const real_t bx = obstacle.vertices[2 * next];
+            const real_t by = obstacle.vertices[2 * next + 1];
+            const real_t cx = obstacle.vertices[2 * after];
+            const real_t cy = obstacle.vertices[2 * after + 1];
+            const real_t edgeSquared =
+                (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+            const real_t turn =
+                (bx - ax) * (cy - by) - (by - ay) * (cx - bx);
+            if (!std::isfinite(ax) || !std::isfinite(ay)
+                || edgeSquared <= 1.0e-18
+                || orientation * turn < -1.0e-12)
+            {
+                error = "obstacle vertices must form an ordered convex polygon";
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+PolygonProjection projectToPolygon(
+    real_t px,
+    real_t py,
+    const ConvexPolygonObstacle& obstacle
+)
+{
+    PolygonProjection projection;
+    real_t bestSquared = INFTY;
+    std::size_t bestEdge = 0;
+    bool inside = true;
+    const real_t area = polygonAreaTwice(obstacle);
+    const real_t orientation = area > 0.0 ? 1.0 : -1.0;
+    const std::size_t count = obstacle.vertices.size() / 2;
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const std::size_t next = (i + 1) % count;
+        const real_t ax = obstacle.vertices[2 * i];
+        const real_t ay = obstacle.vertices[2 * i + 1];
+        const real_t ex = obstacle.vertices[2 * next] - ax;
+        const real_t ey = obstacle.vertices[2 * next + 1] - ay;
+        if (orientation * (ex * (py - ay) - ey * (px - ax)) < -1.0e-12)
+            inside = false;
+        const real_t edgeSquared = ex * ex + ey * ey;
+        const real_t t = std::max(
+            0.0,
+            std::min(1.0, ((px - ax) * ex + (py - ay) * ey) / edgeSquared)
+        );
+        const real_t qx = ax + t * ex;
+        const real_t qy = ay + t * ey;
+        const real_t distanceSquared =
+            (px - qx) * (px - qx) + (py - qy) * (py - qy);
+        if (distanceSquared < bestSquared)
+        {
+            bestSquared = distanceSquared;
+            bestEdge = i;
+            projection.closest[0] = qx;
+            projection.closest[1] = qy;
+        }
+    }
+    const real_t distance = std::sqrt(std::max(0.0, bestSquared));
+    if (!inside && distance > 1.0e-12)
+    {
+        projection.normal[0] = (px - projection.closest[0]) / distance;
+        projection.normal[1] = (py - projection.closest[1]) / distance;
+    }
+    else
+    {
+        const std::size_t next = (bestEdge + 1) % count;
+        const real_t ex = obstacle.vertices[2 * next]
+            - obstacle.vertices[2 * bestEdge];
+        const real_t ey = obstacle.vertices[2 * next + 1]
+            - obstacle.vertices[2 * bestEdge + 1];
+        const real_t inverseLength = 1.0 / std::sqrt(ex * ex + ey * ey);
+        projection.normal[0] = orientation * ey * inverseLength;
+        projection.normal[1] = -orientation * ex * inverseLength;
+    }
+    projection.signedDistance = inside ? -distance : distance;
+    return projection;
+}
+
 int_t stateIndex(const AgentQp& qp, int_t k)
 {
     return k == qp.N ? qp.N * (qp.nx + qp.nu) : k * (qp.nx + qp.nu);
@@ -163,6 +300,8 @@ void buildAgentQp(
     const std::vector<real_t>& nominalStates,
     const std::vector<real_t>& nominalControls,
     real_t trustRegion,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
+    real_t obstacleSafetyDistance,
     int_t worldDimension,
     AgentQp& qp
 )
@@ -172,7 +311,8 @@ void buildAgentQp(
     qp.nu = p.model->controlDimension();
     qp.np = worldDimension;
     qp.nV = (qp.N + 1) * qp.nx + qp.N * qp.nu;
-    qp.nC = qp.N * qp.nx;
+    const int_t dynamicsRows = qp.N * qp.nx;
+    qp.nC = dynamicsRows + qp.N * static_cast<int_t>(obstacles.size());
     qp.Hbase.assign(qp.nV * qp.nV, 0.0);
     qp.gbase.assign(qp.nV, 0.0);
     qp.A.assign(qp.nC * qp.nV, 0.0);
@@ -257,6 +397,41 @@ void buildAgentQp(
             for (int_t j = 0; j < qp.nu; ++j) qp.A[row * qp.nV + uOffset + j] = Bk[i * qp.nu + j];
             qp.A[row * qp.nV + nextOffset + i] = -1.0;
             qp.lbA[row] = qp.ubA[row] = -ck[i];
+        }
+    }
+    const int_t nativeDimension = p.model->positionDimension();
+    std::vector<real_t> nominalPosition(nativeDimension, 0.0);
+    for (std::size_t obstacleIndex = 0;
+         obstacleIndex < obstacles.size();
+         ++obstacleIndex)
+    {
+        for (int_t k = 1; k <= qp.N; ++k)
+        {
+            p.model->position(
+                &nominalStates[k * qp.nx],
+                &nominalPosition[0]
+            );
+            const PolygonProjection projection = projectToPolygon(
+                nominalPosition[0],
+                nominalPosition[1],
+                obstacles[obstacleIndex]
+            );
+            const int_t row = dynamicsRows
+                + static_cast<int_t>(obstacleIndex) * qp.N + k - 1;
+            const int_t offset = stateIndex(qp, k);
+            const real_t* C = &qp.positionC[k * qp.np * qp.nx];
+            const real_t* d = &qp.positionD[k * qp.np];
+            for (int_t j = 0; j < qp.nx; ++j)
+                qp.A[row * qp.nV + offset + j]
+                    = projection.normal[0] * C[j]
+                    + projection.normal[1] * C[qp.nx + j];
+            const real_t support =
+                projection.normal[0] * projection.closest[0]
+                + projection.normal[1] * projection.closest[1];
+            const real_t affine =
+                projection.normal[0] * d[0] + projection.normal[1] * d[1];
+            qp.lbA[row] = support + obstacleSafetyDistance - affine;
+            qp.ubA[row] = INFTY;
         }
     }
     qp.H = qp.Hbase; qp.g = qp.gbase;
@@ -655,13 +830,60 @@ real_t minimumDistance(const std::vector<NonlinearAgentProblem>& agents,
     return minimum;
 }
 
+real_t minimumObstacleDistance(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<std::vector<real_t> >& states,
+    const std::vector<ConvexPolygonObstacle>& obstacles
+)
+{
+    if (obstacles.empty()) return INFTY;
+    real_t minimum = INFTY;
+    for (std::size_t a = 0; a < agents.size(); ++a)
+    {
+        const int_t nx = agents[a].model->stateDimension();
+        const int_t np = agents[a].model->positionDimension();
+        std::vector<real_t> position(np, 0.0);
+        for (int_t k = 0; k <= agents[a].horizon; ++k)
+        {
+            agents[a].model->position(
+                &states[a][k * nx],
+                &position[0]
+            );
+            for (std::size_t obstacleIndex = 0;
+                 obstacleIndex < obstacles.size();
+                 ++obstacleIndex)
+                minimum = std::min(
+                    minimum,
+                    projectToPolygon(
+                        position[0],
+                        position[1],
+                        obstacles[obstacleIndex]
+                    ).signedDistance
+                );
+        }
+    }
+    return minimum;
+}
+
 real_t merit(const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
     const std::vector<std::vector<real_t> >& controls,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
     const NonlinearTurboOptions& options)
 {
-    const real_t violation = std::max(0.0, options.safetyDistance - minimumDistance(agents, states));
-    return trajectoryCost(agents, states, controls) + options.meritPenalty * violation * violation;
+    const real_t pairViolation = std::max(
+        0.0,
+        options.safetyDistance - minimumDistance(agents, states)
+    );
+    const real_t obstacleViolation = std::max(
+        0.0,
+        options.obstacleSafetyDistance
+            - minimumObstacleDistance(agents, states, obstacles)
+    );
+    return trajectoryCost(agents, states, controls)
+        + options.meritPenalty
+            * (pairViolation * pairViolation
+                + obstacleViolation * obstacleViolation);
 }
 
 real_t dynamicsDefect(const std::vector<NonlinearAgentProblem>& agents,
@@ -690,15 +912,16 @@ NonlinearAgentProblem::NonlinearAgentProblem() : model(0), horizon(0) {}
 
 NonlinearTurboOptions::NonlinearTurboOptions()
     : coordinationMethod(NCM_DISTRIBUTED_ADMM), maxScpIterations(8), maxAdmmIterations(40),
-      maxWorkingSetRecalculations(300), maxLineSearchSteps(6), rho(30.0), safetyDistance(1.0),
-      controlTrustRegion(1.0), admmPrimalTolerance(1.0e-3), admmDualTolerance(1.0e-3),
+      maxWorkingSetRecalculations(300), maxLineSearchSteps(6), rho(30.0),
+      safetyDistance(1.0), obstacleSafetyDistance(0.5), controlTrustRegion(1.0),
+      admmPrimalTolerance(1.0e-3), admmDualTolerance(1.0e-3),
       scpStepTolerance(1.0e-3), collisionTolerance(1.0e-2), meritPenalty(1.0e5) {}
 
 NonlinearTurboStatistics::NonlinearTurboStatistics()
     : scpIterations(0), admmIterations(0), qpSolves(0), qpWorkingSetRecalculations(0),
       coldStarts(0), matrixHotstarts(0), vectorHotstarts(0), primalResidual(0.0),
-      dualResidual(0.0), minimumDistance(INFTY), maximumDynamicsDefect(0.0), objective(0.0),
-      solveTimeMilliseconds(0.0) {}
+      dualResidual(0.0), minimumDistance(INFTY), minimumObstacleDistance(INFTY),
+      maximumDynamicsDefect(0.0), objective(0.0), solveTimeMilliseconds(0.0) {}
 
 NonlinearTurboResult::NonlinearTurboResult() : success(false), converged(false) {}
 
@@ -706,12 +929,30 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
     const std::vector<NonlinearAgentProblem>& agents,
     const NonlinearTurboOptions& options) const
 {
+    return solve(
+        agents,
+        std::vector<ConvexPolygonObstacle>(),
+        options
+    );
+}
+
+NonlinearTurboResult NonlinearTurboADMM::solve(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
+    const NonlinearTurboOptions& options) const
+{
     NonlinearTurboResult result;
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
     std::string validationError;
     if (!validateProblems(agents, validationError)) { result.status = validationError; return result; }
+    if (!validateObstacles(agents, obstacles, validationError))
+    {
+        result.status = validationError;
+        return result;
+    }
     if (options.maxScpIterations <= 0 || options.maxAdmmIterations <= 0
-        || options.rho <= 0.0 || options.safetyDistance < 0.0)
+        || options.rho <= 0.0 || options.safetyDistance < 0.0
+        || options.obstacleSafetyDistance < 0.0)
     {
         result.status = "invalid solver options"; return result;
     }
@@ -739,6 +980,8 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 nominalStates[a],
                 nominalControls[a],
                 options.controlTrustRegion,
+                obstacles,
+                options.obstacleSafetyDistance,
                 positionDimension,
                 qps[a]
             );
@@ -763,7 +1006,13 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                     qpControls[a].begin() + k * qps[a].nu);
         }
 
-        real_t bestMerit = merit(agents, nominalStates, nominalControls, options);
+        real_t bestMerit = merit(
+            agents,
+            nominalStates,
+            nominalControls,
+            obstacles,
+            options
+        );
         real_t bestAlpha = 0.0;
         std::vector<std::vector<real_t> > bestStates = nominalStates;
         std::vector<std::vector<real_t> > bestControls = nominalControls;
@@ -781,7 +1030,13 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 clampControls(agents[a], candidateControls[a]);
                 rollout(agents[a], candidateControls[a], candidateStates[a]);
             }
-            const real_t candidateMerit = merit(agents, candidateStates, candidateControls, options);
+            const real_t candidateMerit = merit(
+                agents,
+                candidateStates,
+                candidateControls,
+                obstacles,
+                options
+            );
             if (candidateMerit < bestMerit - 1.0e-10)
             {
                 bestMerit = candidateMerit; bestAlpha = alpha;
@@ -796,8 +1051,15 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         nominalStates.swap(bestStates); nominalControls.swap(bestControls); activeQps.swap(qps);
         result.statistics.scpIterations = outer + 1;
         const real_t distance = minimumDistance(agents, nominalStates);
+        const real_t obstacleDistance = minimumObstacleDistance(
+            agents,
+            nominalStates,
+            obstacles
+        );
         if ((maximumStep <= options.scpStepTolerance || bestAlpha == 0.0)
-            && distance >= options.safetyDistance - options.collisionTolerance)
+            && distance >= options.safetyDistance - options.collisionTolerance
+            && obstacleDistance
+                >= options.obstacleSafetyDistance - options.collisionTolerance)
         {
             result.converged = true; break;
         }
@@ -811,9 +1073,16 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
     }
     result.statistics.minimumDistance = minimumDistance(agents, nominalStates);
     result.statistics.maximumDynamicsDefect = dynamicsDefect(agents, nominalStates, nominalControls);
+    result.statistics.minimumObstacleDistance = minimumObstacleDistance(
+        agents,
+        nominalStates,
+        obstacles
+    );
     result.statistics.objective = trajectoryCost(agents, nominalStates, nominalControls);
     result.success = !qpFailed && result.statistics.minimumDistance
-        >= options.safetyDistance - options.collisionTolerance;
+        >= options.safetyDistance - options.collisionTolerance
+        && result.statistics.minimumObstacleDistance
+            >= options.obstacleSafetyDistance - options.collisionTolerance;
     if (result.status.empty())
         result.status = result.converged ? "converged" : (result.success
             ? "maximum SCP iterations reached with a feasible trajectory"

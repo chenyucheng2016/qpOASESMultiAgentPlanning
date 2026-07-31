@@ -223,6 +223,22 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     ADD_EXECUTABLE(test_nonlinear_two_agent tests/test_nonlinear_two_agent.cpp)
     TARGET_LINK_LIBRARIES(test_nonlinear_two_agent qpOASES)
     add_test(NAME nonlinear_two_agent COMMAND test_nonlinear_two_agent)
+    ADD_EXECUTABLE(test_heterogeneous_models tests/test_heterogeneous_models.cpp)
+    TARGET_LINK_LIBRARIES(test_heterogeneous_models qpOASES)
+    add_test(NAME heterogeneous_model_jacobians COMMAND test_heterogeneous_models)
+    ADD_EXECUTABLE(
+        test_heterogeneous_three_agent
+        tests/test_heterogeneous_three_agent.cpp
+    )
+    TARGET_LINK_LIBRARIES(test_heterogeneous_three_agent qpOASES)
+    add_test(
+        NAME heterogeneous_three_agent
+        COMMAND test_heterogeneous_three_agent
+    )
+    ADD_CUSTOM_TARGET(nonlinear_heterogeneous_benchmark
+        COMMAND $<TARGET_FILE:test_heterogeneous_three_agent>
+            --csv ${CMAKE_BINARY_DIR}/heterogeneous_benchmark.csv
+        DEPENDS test_heterogeneous_three_agent)
 endif()
 
 if(QPOASES_BUILD_EXTERNAL_BENCHMARKS)

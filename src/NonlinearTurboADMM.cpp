@@ -74,16 +74,16 @@ bool validateProblems(const std::vector<NonlinearAgentProblem>& agents, std::str
 {
     if (agents.empty()) { error = "at least one agent is required"; return false; }
     const int_t N = agents[0].horizon;
-    const int_t np = agents[0].model ? agents[0].model->positionDimension() : -1;
     for (std::size_t a = 0; a < agents.size(); ++a)
     {
         const NonlinearAgentProblem& p = agents[a];
         if (!p.model) { error = "each agent requires a nonlinear model"; return false; }
         const int_t nx = p.model->stateDimension();
         const int_t nu = p.model->controlDimension();
-        if (p.horizon <= 0 || p.horizon != N || p.model->positionDimension() != np)
+        if (p.horizon <= 0 || p.horizon != N
+            || p.model->positionDimension() <= 0)
         {
-            error = "agents require a common positive horizon and position dimension";
+            error = "agents require a common positive horizon and position outputs";
             return false;
         }
         if (p.initialState.size() != static_cast<std::size_t>(nx)
@@ -107,6 +107,30 @@ bool validateProblems(const std::vector<NonlinearAgentProblem>& agents, std::str
         }
     }
     return true;
+}
+
+int_t worldPositionDimension(
+    const std::vector<NonlinearAgentProblem>& agents
+)
+{
+    int_t dimension = 0;
+    for (std::size_t a = 0; a < agents.size(); ++a)
+        dimension = std::max(
+            dimension,
+            agents[a].model->positionDimension()
+        );
+    return dimension;
+}
+
+void worldPosition(
+    const NonlinearModel& model,
+    const real_t* state,
+    int_t worldDimension,
+    real_t* position
+)
+{
+    for (int_t i = 0; i < worldDimension; ++i) position[i] = 0.0;
+    model.position(state, position);
 }
 
 void clampControls(const NonlinearAgentProblem& p, std::vector<real_t>& controls)
@@ -139,13 +163,14 @@ void buildAgentQp(
     const std::vector<real_t>& nominalStates,
     const std::vector<real_t>& nominalControls,
     real_t trustRegion,
+    int_t worldDimension,
     AgentQp& qp
 )
 {
     qp.N = p.horizon;
     qp.nx = p.model->stateDimension();
     qp.nu = p.model->controlDimension();
-    qp.np = p.model->positionDimension();
+    qp.np = worldDimension;
     qp.nV = (qp.N + 1) * qp.nx + qp.N * qp.nu;
     qp.nC = qp.N * qp.nx;
     qp.Hbase.assign(qp.nV * qp.nV, 0.0);
@@ -174,14 +199,26 @@ void buildAgentQp(
         }
         real_t* C = &qp.positionC[k * qp.np * qp.nx];
         real_t* d = &qp.positionD[k * qp.np];
-        std::vector<real_t> position(qp.np, 0.0);
-        p.model->position(&nominalStates[k * qp.nx], &position[0]);
-        p.model->linearizePosition(&nominalStates[k * qp.nx], C);
-        for (int_t i = 0; i < qp.np; ++i)
+        const int_t nativeDimension = p.model->positionDimension();
+        std::vector<real_t> position(nativeDimension, 0.0);
+        std::vector<real_t> nativeC(nativeDimension * qp.nx, 0.0);
+        p.model->position(
+            &nominalStates[k * qp.nx],
+            &position[0]
+        );
+        p.model->linearizePosition(
+            &nominalStates[k * qp.nx],
+            &nativeC[0]
+        );
+        for (int_t i = 0; i < nativeDimension; ++i)
         {
             d[i] = position[i];
             for (int_t j = 0; j < qp.nx; ++j)
-                d[i] -= C[i * qp.nx + j] * nominalStates[k * qp.nx + j];
+            {
+                C[i * qp.nx + j] = nativeC[i * qp.nx + j];
+                d[i] -= C[i * qp.nx + j]
+                    * nominalStates[k * qp.nx + j];
+            }
         }
     }
     for (int_t i = 0; i < qp.nx; ++i) qp.lb[i] = qp.ub[i] = p.initialState[i];
@@ -242,11 +279,11 @@ void positionFromDecision(
 std::vector<PairData> buildPairs(
     const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
+    int_t np,
     real_t safetyDistance)
 {
     std::vector<PairData> pairs;
     const int_t N = agents[0].horizon;
-    const int_t np = agents[0].model->positionDimension();
     for (std::size_t first = 0; first < agents.size(); ++first)
     for (std::size_t second = first + 1; second < agents.size(); ++second)
     {
@@ -262,8 +299,18 @@ std::vector<PairData> buildPairs(
             const int_t nxf = agents[first].model->stateDimension();
             const int_t nxs = agents[second].model->stateDimension();
             real_t* pf = &pair.firstPosition[k * np]; real_t* ps = &pair.secondPosition[k * np];
-            agents[first].model->position(&states[first][k * nxf], pf);
-            agents[second].model->position(&states[second][k * nxs], ps);
+            worldPosition(
+                *agents[first].model,
+                &states[first][k * nxf],
+                np,
+                pf
+            );
+            worldPosition(
+                *agents[second].model,
+                &states[second][k * nxs],
+                np,
+                ps
+            );
             real_t norm = 0.0;
             for (int_t i = 0; i < np; ++i)
             {
@@ -579,17 +626,27 @@ real_t minimumDistance(const std::vector<NonlinearAgentProblem>& agents,
 {
     if (agents.size() < 2) return INFTY;
     real_t minimum = INFTY;
+    const int_t np = worldPositionDimension(agents);
     for (std::size_t first = 0; first < agents.size(); ++first)
     for (std::size_t second = first + 1; second < agents.size(); ++second)
     {
         const int_t nxf = agents[first].model->stateDimension();
         const int_t nxs = agents[second].model->stateDimension();
-        const int_t np = agents[first].model->positionDimension();
         std::vector<real_t> pf(np, 0.0), ps(np, 0.0);
         for (int_t k = 0; k <= agents[first].horizon; ++k)
         {
-            agents[first].model->position(&states[first][k * nxf], &pf[0]);
-            agents[second].model->position(&states[second][k * nxs], &ps[0]);
+            worldPosition(
+                *agents[first].model,
+                &states[first][k * nxf],
+                np,
+                &pf[0]
+            );
+            worldPosition(
+                *agents[second].model,
+                &states[second][k * nxs],
+                np,
+                &ps[0]
+            );
             real_t squared = 0.0;
             for (int_t i = 0; i < np; ++i) squared += (pf[i] - ps[i]) * (pf[i] - ps[i]);
             minimum = std::min(minimum, std::sqrt(squared));
@@ -672,12 +729,25 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
     std::vector<AgentQp> activeQps;
     SolverPool distributedSolvers; CentralContext centralContext;
     bool qpFailed = false;
+    const int_t positionDimension = worldPositionDimension(agents);
     for (int_t outer = 0; outer < options.maxScpIterations; ++outer)
     {
         std::vector<AgentQp> qps(agents.size());
         for (std::size_t a = 0; a < agents.size(); ++a)
-            buildAgentQp(agents[a], nominalStates[a], nominalControls[a], options.controlTrustRegion, qps[a]);
-        std::vector<PairData> pairs = buildPairs(agents, nominalStates, options.safetyDistance);
+            buildAgentQp(
+                agents[a],
+                nominalStates[a],
+                nominalControls[a],
+                options.controlTrustRegion,
+                positionDimension,
+                qps[a]
+            );
+        std::vector<PairData> pairs = buildPairs(
+            agents,
+            nominalStates,
+            positionDimension,
+            options.safetyDistance
+        );
         const bool solved = options.coordinationMethod == NCM_DISTRIBUTED_ADMM
             ? solveDistributed(agents, outer, options, distributedSolvers, pairs, qps, result.statistics)
             : solveCentralized(agents, pairs, outer, options, centralContext, qps, result.statistics);

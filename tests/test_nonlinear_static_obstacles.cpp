@@ -25,13 +25,6 @@ NonlinearAgentProblem makeAgent(const UnicycleModel& model, int_t horizon)
         const real_t alpha = static_cast<real_t>(k) / horizon;
         p.stateReference[k * 4] = -3.0 + 6.0 * alpha;
         p.stateReference[k * 4 + 3] = 1.0;
-        if (k < horizon)
-        {
-            real_t yawRate = 0.0;
-            if (k < 4 || k >= 20) yawRate = 0.7;
-            else if (k >= 8 && k < 16) yawRate = -0.7;
-            p.initialControls[k * 2 + 1] = yawRate;
-        }
     }
     const real_t q[] = {2.0, 4.0, 0.3, 0.1};
     const real_t qTerminal[] = {20.0, 20.0, 1.0, 0.2};
@@ -58,6 +51,7 @@ NonlinearAgentProblem makeQuadcopter(
     NonlinearAgentProblem p;
     p.model = &model;
     p.horizon = horizon;
+    p.obstacleSafetyDistance = 0.4;
     const real_t initial[] = {
         1.2, -3.0, 1.5, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0
     };
@@ -116,6 +110,45 @@ ConvexPolygonObstacle makeObstacle()
     return obstacle;
 }
 
+ConvexPolygonObstacle translatedObstacle(real_t x, real_t y)
+{
+    ConvexPolygonObstacle obstacle = makeObstacle();
+    for (std::size_t vertex = 0;
+         vertex < obstacle.vertices.size() / 2;
+         ++vertex)
+    {
+        obstacle.vertices[2 * vertex] += x;
+        obstacle.vertices[2 * vertex + 1] += y;
+    }
+    return obstacle;
+}
+
+std::vector<ConvexPolygonObstacle> makeNarrowPassage()
+{
+    std::vector<ConvexPolygonObstacle> obstacles(2);
+    const real_t lowerVertices[] = {
+        -1.5, -2.0,
+         1.5, -2.0,
+         1.5, -0.35,
+        -1.5, -0.35
+    };
+    const real_t upperVertices[] = {
+        -1.5, 0.35,
+         1.5, 0.35,
+         1.5, 2.0,
+        -1.5, 2.0
+    };
+    obstacles[0].vertices.assign(
+        lowerVertices,
+        lowerVertices + 8
+    );
+    obstacles[1].vertices.assign(
+        upperVertices,
+        upperVertices + 8
+    );
+    return obstacles;
+}
+
 real_t finalPositionError(
     const NonlinearAgentProblem& problem,
     const NonlinearTrajectory& trajectory
@@ -152,15 +185,17 @@ bool runMethod(
         result.trajectories[0]
     );
     std::printf(
-        "%s obstacle: %s, clearance %.3f, defect %.3e, terminal %.3f\n",
+        "%s obstacle: %s, distance %.3f, margin %.3f, defect %.3e, terminal %.3f\n",
         method == NCM_DISTRIBUTED_ADMM ? "distributed" : "centralized",
         result.status.c_str(),
         result.statistics.minimumObstacleDistance,
+        result.statistics.minimumObstacleClearance,
         result.statistics.maximumDynamicsDefect,
         terminalError
     );
     return result.success
         && result.statistics.minimumObstacleDistance >= 0.29
+        && result.statistics.minimumObstacleClearance >= -0.01
         && result.statistics.maximumDynamicsDefect <= 1.0e-9
         && terminalError <= 0.5;
 }
@@ -184,16 +219,18 @@ bool runHeterogeneous(
         options
     );
     std::printf(
-        "heterogeneous obstacle: %s, pair %.3f, clearance %.3f, defect %.3e\n",
+        "heterogeneous obstacle: %s, pair %.3f, distance %.3f, margin %.3f, defect %.3e\n",
         result.status.c_str(),
         result.statistics.minimumDistance,
         result.statistics.minimumObstacleDistance,
+        result.statistics.minimumObstacleClearance,
         result.statistics.maximumDynamicsDefect
     );
     return result.success
         && result.trajectories.size() == agents.size()
         && result.statistics.minimumDistance >= 0.79
         && result.statistics.minimumObstacleDistance >= 0.29
+        && result.statistics.minimumObstacleClearance >= -0.01
         && result.statistics.maximumDynamicsDefect <= 1.0e-9
         && result.trajectories[1].states.size()
             == static_cast<std::size_t>(
@@ -248,5 +285,18 @@ int main()
         makeQuadcopter(quadcopter, horizon)
     );
     if (!runHeterogeneous(heterogeneousAgents, obstacles)) return 1;
+    std::vector<ConvexPolygonObstacle> multipleObstacles;
+    multipleObstacles.push_back(translatedObstacle(-1.0, 0.0));
+    multipleObstacles.push_back(translatedObstacle(1.0, 0.0));
+    if (!runMethod(
+            NCM_DISTRIBUTED_ADMM, agents, multipleObstacles)) return 1;
+    if (!runMethod(
+            NCM_CENTRALIZED_SCP, agents, multipleObstacles)) return 1;
+    const std::vector<ConvexPolygonObstacle> narrowPassage =
+        makeNarrowPassage();
+    if (!runMethod(
+            NCM_DISTRIBUTED_ADMM, agents, narrowPassage)) return 1;
+    if (!runMethod(
+            NCM_CENTRALIZED_SCP, agents, narrowPassage)) return 1;
     return 0;
 }

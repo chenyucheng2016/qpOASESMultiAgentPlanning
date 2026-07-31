@@ -18,8 +18,12 @@ linear `TurboADMM` API.
   geometry is evaluated in the maximum world dimension; 2D positions are
   embedded at `z = 0` when a 3D model is present.
 - `ConvexPolygonObstacle` supplies ordered x-y vertices to the nonlinear
-  solver. Each SCP stage uses the separating plane at the nominal point's
-  closest polygon point and enforces `obstacleSafetyDistance`.
+  solver. If a reference intersects an obstacle, the solver deterministically
+  selects the lower-cost bypass side and uses supporting planes along the
+  clearance-offset polygon boundary. This permits zero-control initialization
+  for the tested single- and multiple-obstacle routes.
+- Each agent may override `options.obstacleSafetyDistance` with
+  `problem.obstacleSafetyDistance`; a negative value keeps the global default.
 - Polygon obstacles are treated as vertical prisms for 3D agents.
 - `solveStageVaryingLqr` solves affine, time-varying finite-horizon LQR and
   supplies a dynamics-feasible primal warm start.
@@ -44,9 +48,9 @@ NonlinearTurboResult result = solver.solve(agents, obstacles, options);
 ```
 
 Clockwise and counter-clockwise vertex order are accepted; concave, degenerate,
-or unordered polygons are rejected. Because the collision-free exterior is
-nonconvex, the initial controls should seed the intended homotopy around an
-obstacle.
+or unordered polygons are rejected. Automatic bypass selection is local and
+deterministic. Complicated obstacle fields with competing homotopy classes may
+still benefit from a collision-free reference or initial controls.
 
 ## Build and verify
 
@@ -69,9 +73,10 @@ cmake --build build-nonlinear --target nonlinear_heterogeneous_benchmark
 ```
 
 The output is `build-nonlinear/heterogeneous_benchmark.csv`. It records
-convergence and feasibility separately, wall time, objective, safety margin,
-nonlinear dynamics defect, iteration and QP work counts, hotstart counts, and
-terminal tracking errors.
+convergence and feasibility separately, wall time, objective, raw pair and
+obstacle distance, per-agent obstacle-clearance margin, nonlinear dynamics
+defect, iteration and QP work counts, hotstart counts, and terminal tracking
+errors.
 
 The deterministic tests verify:
 
@@ -84,8 +89,10 @@ The deterministic tests verify:
 5. one heterogeneous problem containing a unicycle, bicycle, and 3D
    quadcopter for both distributed ADMM and centralized SCP;
 6. convex-polygon avoidance for distributed and centralized SCP, invalid
-   polygon rejection, and mixed unicycle-quadcopter avoidance of a vertically
-   extruded polygon.
+   polygon rejection, per-agent clearance in mixed unicycle-quadcopter
+   avoidance of a vertically extruded polygon, zero-seed avoidance of two
+   intersecting polygons, and a 0.70 m polygon corridor with 0.10 m residual
+   width after clearance inflation.
 
 ## RA-L benchmark completion gates
 

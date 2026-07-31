@@ -184,6 +184,189 @@ PolygonProjection projectToPolygon(
     return projection;
 }
 
+struct ObstacleBypass
+{
+    bool active;
+    real_t direction[2];
+    real_t normal[2];
+    real_t minimumTravel;
+    real_t maximumTravel;
+    ObstacleBypass() : active(false), minimumTravel(0.0),
+        maximumTravel(0.0)
+    {
+        direction[0] = direction[1] = 0.0;
+        normal[0] = normal[1] = 0.0;
+    }
+};
+
+real_t polygonSupport(
+    const ConvexPolygonObstacle& obstacle,
+    const real_t* normal
+)
+{
+    real_t support = -INFTY;
+    for (std::size_t vertex = 0;
+         vertex < obstacle.vertices.size() / 2;
+         ++vertex)
+        support = std::max(
+            support,
+            normal[0] * obstacle.vertices[2 * vertex]
+                + normal[1] * obstacle.vertices[2 * vertex + 1]
+        );
+    return support;
+}
+
+ObstacleBypass buildObstacleBypass(
+    const NonlinearAgentProblem& agent,
+    const ConvexPolygonObstacle& obstacle,
+    real_t requiredDistance
+)
+{
+    ObstacleBypass bypass;
+    const int_t nx = agent.model->stateDimension();
+    const int_t np = agent.model->positionDimension();
+    std::vector<real_t> position(np, 0.0);
+    real_t start[2], goal[2];
+    agent.model->position(&agent.stateReference[0], &position[0]);
+    start[0] = position[0]; start[1] = position[1];
+    agent.model->position(
+        &agent.stateReference[agent.horizon * nx],
+        &position[0]
+    );
+    goal[0] = position[0]; goal[1] = position[1];
+    const real_t dx = goal[0] - start[0];
+    const real_t dy = goal[1] - start[1];
+    const real_t length = std::sqrt(dx * dx + dy * dy);
+    if (length <= 1.0e-9) return bypass;
+    bypass.direction[0] = dx / length;
+    bypass.direction[1] = dy / length;
+    const real_t candidates[2][2] = {
+        {-bypass.direction[1], bypass.direction[0]},
+        {bypass.direction[1], -bypass.direction[0]}
+    };
+    real_t costs[2] = {0.0, 0.0};
+    bool intersects = false;
+    for (int_t k = 0; k <= agent.horizon; ++k)
+    {
+        agent.model->position(
+            &agent.stateReference[k * nx],
+            &position[0]
+        );
+        if (projectToPolygon(
+                position[0], position[1], obstacle
+            ).signedDistance < requiredDistance)
+            intersects = true;
+        for (int_t candidate = 0; candidate < 2; ++candidate)
+        {
+            const real_t violation = std::max(
+                0.0,
+                polygonSupport(obstacle, candidates[candidate])
+                    + requiredDistance
+                    - candidates[candidate][0] * position[0]
+                    - candidates[candidate][1] * position[1]
+            );
+            costs[candidate] += violation * violation;
+        }
+    }
+    if (!intersects) return bypass;
+    const int_t selected = costs[1] < costs[0] ? 1 : 0;
+    bypass.active = true;
+    bypass.normal[0] = candidates[selected][0];
+    bypass.normal[1] = candidates[selected][1];
+    bypass.minimumTravel = INFTY;
+    bypass.maximumTravel = -INFTY;
+    for (std::size_t vertex = 0;
+         vertex < obstacle.vertices.size() / 2;
+         ++vertex)
+    {
+        const real_t travel =
+            bypass.direction[0] * obstacle.vertices[2 * vertex]
+            + bypass.direction[1] * obstacle.vertices[2 * vertex + 1];
+        bypass.minimumTravel = std::min(bypass.minimumTravel, travel);
+        bypass.maximumTravel = std::max(bypass.maximumTravel, travel);
+    }
+    bypass.minimumTravel -= requiredDistance;
+    bypass.maximumTravel += requiredDistance;
+    return bypass;
+}
+
+bool bypassHalfspaceAt(
+    const ObstacleBypass& bypass,
+    const ConvexPolygonObstacle& obstacle,
+    real_t requiredDistance,
+    real_t travel,
+    real_t* normal,
+    real_t& support
+)
+{
+    if (!bypass.active
+        || travel < bypass.minimumTravel
+        || travel > bypass.maximumTravel)
+        return false;
+
+    const real_t oppositeNormal[2] = {
+        -bypass.normal[0], -bypass.normal[1]
+    };
+    const real_t maximumTransverse = polygonSupport(
+        obstacle,
+        bypass.normal
+    );
+    const real_t minimumTransverse = -polygonSupport(
+        obstacle,
+        oppositeNormal
+    );
+    real_t outside = maximumTransverse + requiredDistance + 1.0e-9;
+    const real_t searchRange = maximumTransverse - minimumTransverse
+        + 2.0 * requiredDistance + 1.0e-6;
+    real_t inside = outside;
+    bool foundInside = false;
+    for (int_t sample = 1; sample <= 64; ++sample)
+    {
+        const real_t transverse = outside
+            - searchRange * static_cast<real_t>(sample) / 64.0;
+        const real_t x = travel * bypass.direction[0]
+            + transverse * bypass.normal[0];
+        const real_t y = travel * bypass.direction[1]
+            + transverse * bypass.normal[1];
+        if (projectToPolygon(x, y, obstacle).signedDistance
+            < requiredDistance)
+        {
+            inside = transverse;
+            foundInside = true;
+            break;
+        }
+    }
+    if (!foundInside) return false;
+
+    for (int_t iteration = 0; iteration < 40; ++iteration)
+    {
+        const real_t transverse = 0.5 * (inside + outside);
+        const real_t x = travel * bypass.direction[0]
+            + transverse * bypass.normal[0];
+        const real_t y = travel * bypass.direction[1]
+            + transverse * bypass.normal[1];
+        if (projectToPolygon(x, y, obstacle).signedDistance
+            < requiredDistance)
+            inside = transverse;
+        else
+            outside = transverse;
+    }
+    const real_t boundaryX = travel * bypass.direction[0]
+        + outside * bypass.normal[0];
+    const real_t boundaryY = travel * bypass.direction[1]
+        + outside * bypass.normal[1];
+    const PolygonProjection projection = projectToPolygon(
+        boundaryX,
+        boundaryY,
+        obstacle
+    );
+    normal[0] = projection.normal[0];
+    normal[1] = projection.normal[1];
+    support = normal[0] * projection.closest[0]
+        + normal[1] * projection.closest[1];
+    return true;
+}
+
 int_t stateIndex(const AgentQp& qp, int_t k)
 {
     return k == qp.N ? qp.N * (qp.nx + qp.nu) : k * (qp.nx + qp.nu);
@@ -197,6 +380,15 @@ int_t controlIndex(const AgentQp& qp, int_t k)
 real_t optionalBound(const std::vector<real_t>& values, int_t i, real_t fallback)
 {
     return values.empty() ? fallback : values[i];
+}
+
+real_t obstacleDistanceForAgent(
+    const NonlinearAgentProblem& agent,
+    const NonlinearTurboOptions& options
+)
+{
+    return agent.obstacleSafetyDistance >= 0.0
+        ? agent.obstacleSafetyDistance : options.obstacleSafetyDistance;
 }
 
 void configureSolver(SQProblem& solver)
@@ -401,10 +593,16 @@ void buildAgentQp(
     }
     const int_t nativeDimension = p.model->positionDimension();
     std::vector<real_t> nominalPosition(nativeDimension, 0.0);
+    std::vector<real_t> referencePosition(nativeDimension, 0.0);
     for (std::size_t obstacleIndex = 0;
          obstacleIndex < obstacles.size();
          ++obstacleIndex)
     {
+        const ObstacleBypass bypass = buildObstacleBypass(
+            p,
+            obstacles[obstacleIndex],
+            obstacleSafetyDistance
+        );
         for (int_t k = 1; k <= qp.N; ++k)
         {
             p.model->position(
@@ -416,6 +614,26 @@ void buildAgentQp(
                 nominalPosition[1],
                 obstacles[obstacleIndex]
             );
+            p.model->position(
+                &p.stateReference[k * qp.nx],
+                &referencePosition[0]
+            );
+            const real_t referenceTravel =
+                bypass.direction[0] * referencePosition[0]
+                + bypass.direction[1] * referencePosition[1];
+            real_t normal[2] = {
+                projection.normal[0], projection.normal[1]
+            };
+            real_t support = normal[0] * projection.closest[0]
+                + normal[1] * projection.closest[1];
+            bypassHalfspaceAt(
+                bypass,
+                obstacles[obstacleIndex],
+                obstacleSafetyDistance,
+                referenceTravel,
+                normal,
+                support
+            );
             const int_t row = dynamicsRows
                 + static_cast<int_t>(obstacleIndex) * qp.N + k - 1;
             const int_t offset = stateIndex(qp, k);
@@ -423,13 +641,8 @@ void buildAgentQp(
             const real_t* d = &qp.positionD[k * qp.np];
             for (int_t j = 0; j < qp.nx; ++j)
                 qp.A[row * qp.nV + offset + j]
-                    = projection.normal[0] * C[j]
-                    + projection.normal[1] * C[qp.nx + j];
-            const real_t support =
-                projection.normal[0] * projection.closest[0]
-                + projection.normal[1] * projection.closest[1];
-            const real_t affine =
-                projection.normal[0] * d[0] + projection.normal[1] * d[1];
+                    = normal[0] * C[j] + normal[1] * C[qp.nx + j];
+            const real_t affine = normal[0] * d[0] + normal[1] * d[1];
             qp.lbA[row] = support + obstacleSafetyDistance - affine;
             qp.ubA[row] = INFTY;
         }
@@ -865,6 +1078,46 @@ real_t minimumObstacleDistance(
     return minimum;
 }
 
+real_t minimumObstacleClearance(
+    const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<std::vector<real_t> >& states,
+    const std::vector<ConvexPolygonObstacle>& obstacles,
+    const NonlinearTurboOptions& options
+)
+{
+    if (obstacles.empty()) return INFTY;
+    real_t minimum = INFTY;
+    for (std::size_t a = 0; a < agents.size(); ++a)
+    {
+        const int_t nx = agents[a].model->stateDimension();
+        const int_t np = agents[a].model->positionDimension();
+        const real_t requiredDistance = obstacleDistanceForAgent(
+            agents[a],
+            options
+        );
+        std::vector<real_t> position(np, 0.0);
+        for (int_t k = 0; k <= agents[a].horizon; ++k)
+        {
+            agents[a].model->position(
+                &states[a][k * nx],
+                &position[0]
+            );
+            for (std::size_t obstacleIndex = 0;
+                 obstacleIndex < obstacles.size();
+                 ++obstacleIndex)
+                minimum = std::min(
+                    minimum,
+                    projectToPolygon(
+                        position[0],
+                        position[1],
+                        obstacles[obstacleIndex]
+                    ).signedDistance - requiredDistance
+                );
+        }
+    }
+    return minimum;
+}
+
 real_t merit(const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
     const std::vector<std::vector<real_t> >& controls,
@@ -876,9 +1129,7 @@ real_t merit(const std::vector<NonlinearAgentProblem>& agents,
         options.safetyDistance - minimumDistance(agents, states)
     );
     const real_t obstacleViolation = std::max(
-        0.0,
-        options.obstacleSafetyDistance
-            - minimumObstacleDistance(agents, states, obstacles)
+        0.0, -minimumObstacleClearance(agents, states, obstacles, options)
     );
     return trajectoryCost(agents, states, controls)
         + options.meritPenalty
@@ -908,7 +1159,8 @@ real_t dynamicsDefect(const std::vector<NonlinearAgentProblem>& agents,
 
 } // anonymous namespace
 
-NonlinearAgentProblem::NonlinearAgentProblem() : model(0), horizon(0) {}
+NonlinearAgentProblem::NonlinearAgentProblem()
+    : model(0), horizon(0), obstacleSafetyDistance(-1.0) {}
 
 NonlinearTurboOptions::NonlinearTurboOptions()
     : coordinationMethod(NCM_DISTRIBUTED_ADMM), maxScpIterations(8), maxAdmmIterations(40),
@@ -921,6 +1173,7 @@ NonlinearTurboStatistics::NonlinearTurboStatistics()
     : scpIterations(0), admmIterations(0), qpSolves(0), qpWorkingSetRecalculations(0),
       coldStarts(0), matrixHotstarts(0), vectorHotstarts(0), primalResidual(0.0),
       dualResidual(0.0), minimumDistance(INFTY), minimumObstacleDistance(INFTY),
+      minimumObstacleClearance(INFTY),
       maximumDynamicsDefect(0.0), objective(0.0), solveTimeMilliseconds(0.0) {}
 
 NonlinearTurboResult::NonlinearTurboResult() : success(false), converged(false) {}
@@ -981,7 +1234,7 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 nominalControls[a],
                 options.controlTrustRegion,
                 obstacles,
-                options.obstacleSafetyDistance,
+                obstacleDistanceForAgent(agents[a], options),
                 positionDimension,
                 qps[a]
             );
@@ -1051,15 +1304,15 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         nominalStates.swap(bestStates); nominalControls.swap(bestControls); activeQps.swap(qps);
         result.statistics.scpIterations = outer + 1;
         const real_t distance = minimumDistance(agents, nominalStates);
-        const real_t obstacleDistance = minimumObstacleDistance(
+        const real_t obstacleClearance = minimumObstacleClearance(
             agents,
             nominalStates,
-            obstacles
+            obstacles,
+            options
         );
         if ((maximumStep <= options.scpStepTolerance || bestAlpha == 0.0)
             && distance >= options.safetyDistance - options.collisionTolerance
-            && obstacleDistance
-                >= options.obstacleSafetyDistance - options.collisionTolerance)
+            && obstacleClearance >= -options.collisionTolerance)
         {
             result.converged = true; break;
         }
@@ -1078,11 +1331,16 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         nominalStates,
         obstacles
     );
+    result.statistics.minimumObstacleClearance = minimumObstacleClearance(
+        agents,
+        nominalStates,
+        obstacles,
+        options
+    );
     result.statistics.objective = trajectoryCost(agents, nominalStates, nominalControls);
     result.success = !qpFailed && result.statistics.minimumDistance
         >= options.safetyDistance - options.collisionTolerance
-        && result.statistics.minimumObstacleDistance
-            >= options.obstacleSafetyDistance - options.collisionTolerance;
+        && result.statistics.minimumObstacleClearance >= -options.collisionTolerance;
     if (result.status.empty())
         result.status = result.converged ? "converged" : (result.success
             ? "maximum SCP iterations reached with a feasible trajectory"

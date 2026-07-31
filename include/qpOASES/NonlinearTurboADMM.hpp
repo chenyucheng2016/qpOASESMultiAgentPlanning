@@ -27,6 +27,8 @@ struct NonlinearAgentProblem
 {
     const NonlinearModel* model;
     int_t horizon;
+    /** Negative uses NonlinearTurboOptions::obstacleSafetyDistance. */
+    real_t obstacleSafetyDistance;
     std::vector<real_t> initialState;
     std::vector<real_t> stateReference;
     std::vector<real_t> controlReference;
@@ -79,6 +81,7 @@ struct NonlinearTurboStatistics
     real_t dualResidual;
     real_t minimumDistance;
     real_t minimumObstacleDistance;
+    real_t minimumObstacleClearance;
     real_t maximumDynamicsDefect;
     real_t objective;
     real_t solveTimeMilliseconds;

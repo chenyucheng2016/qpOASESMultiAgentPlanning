@@ -29,7 +29,7 @@
 ##     Date:      2007-2017
 ##
 
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 3.5)
 
 PROJECT(qpOASES CXX)
 SET(PACKAGE_NAME "qpOASES")
@@ -69,6 +69,8 @@ ENDIF( NOT CMAKE_BUILD_TYPE )
 
 option(BUILD_SHARED_LIBS "If ON, build shared library instead of static" OFF)
 option(QPOASES_BUILD_EXAMPLES "Build examples." ON)
+option(QPOASES_BUILD_NONLINEAR_TESTS "Build TurboSCP nonlinear tests." ON)
+option(QPOASES_BUILD_EXTERNAL_BENCHMARKS "Build OSQP, MOSEK, and HPIPM comparisons." OFF)
 option(QPOASES_AVOID_LA_NAMING_CONFLICTS "If ON, avoid to re-defined symbols that conflict with Blas/Lapack provided functions." OFF)
 
 IF(BUILD_SHARED_LIBS AND WIN32)
@@ -210,6 +212,20 @@ endif(QPOASES_BUILD_EXAMPLES)
 ######################### tests ###########################
 ############################################################
 
+if(QPOASES_BUILD_NONLINEAR_TESTS)
+    enable_testing()
+    ADD_EXECUTABLE(test_nonlinear_model tests/test_nonlinear_model.cpp)
+    TARGET_LINK_LIBRARIES(test_nonlinear_model qpOASES)
+    add_test(NAME nonlinear_model_jacobians COMMAND test_nonlinear_model)
+    ADD_EXECUTABLE(test_stage_varying_riccati tests/test_stage_varying_riccati.cpp)
+    TARGET_LINK_LIBRARIES(test_stage_varying_riccati qpOASES)
+    add_test(NAME stage_varying_riccati COMMAND test_stage_varying_riccati)
+    ADD_EXECUTABLE(test_nonlinear_two_agent tests/test_nonlinear_two_agent.cpp)
+    TARGET_LINK_LIBRARIES(test_nonlinear_two_agent qpOASES)
+    add_test(NAME nonlinear_two_agent COMMAND test_nonlinear_two_agent)
+endif()
+
+if(QPOASES_BUILD_EXTERNAL_BENCHMARKS)
 find_package(osqp REQUIRED)
 
 # Find MOSEK
@@ -320,6 +336,7 @@ if(HPIPM_FOUND)
     message(STATUS "HPIPM tests will be built")
 else()
     message(STATUS "HPIPM tests will be skipped (HPIPM not found)")
+endif()
 endif()
 
 ##

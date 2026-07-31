@@ -69,5 +69,8 @@
 #include <qpOASES/SQProblemSchur.hpp>
 #include <qpOASES/extras/OQPinterface.hpp>
 #include <qpOASES/extras/SolutionAnalysis.hpp>
+#include <qpOASES/NonlinearModel.hpp>
+#include <qpOASES/StageVaryingRiccati.hpp>
+#include <qpOASES/NonlinearTurboADMM.hpp>
 
 #endif

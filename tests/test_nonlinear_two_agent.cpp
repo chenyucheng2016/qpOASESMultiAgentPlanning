@@ -53,10 +53,14 @@ bool runMethod(NonlinearCoordinationMethod method, const std::vector<NonlinearAg
     options.maxAdmmIterations = 50; options.controlTrustRegion = 0.8;
     options.admmPrimalTolerance = 2.0e-3; options.admmDualTolerance = 2.0e-3;
     NonlinearTurboADMM solver; const NonlinearTurboResult result = solver.solve(agents, options);
+    if (result.trajectories.size() != agents.size()) return false;
     const real_t e0 = finalError(agents[0], result.trajectories[0]);
     const real_t e1 = finalError(agents[1], result.trajectories[1]);
+    const char* name = method == NCM_DISTRIBUTED_ADMM ? "distributed"
+        : method == NCM_CENTRALIZED_SCP ? "centralized_qpoases"
+        : "centralized_osqp";
     std::printf("%s: %s, %.2f ms, SCP %d, ADMM %d, QPs %d, distance %.3f, margin %.3f, errors %.3f/%.3f\n",
-        method == NCM_DISTRIBUTED_ADMM ? "distributed" : "centralized", result.status.c_str(),
+        name, result.status.c_str(),
         result.statistics.solveTimeMilliseconds, result.statistics.scpIterations,
         result.statistics.admmIterations, result.statistics.qpSolves,
         result.statistics.minimumDistance, result.statistics.minimumPairwiseClearance, e0, e1);
@@ -64,7 +68,8 @@ bool runMethod(NonlinearCoordinationMethod method, const std::vector<NonlinearAg
         && result.statistics.minimumDistance >= 1.19
         && result.statistics.minimumPairwiseClearance >= -0.01
         && e0 <= 2.0 && e1 <= 2.0
-        && (method != NCM_DISTRIBUTED_ADMM || result.statistics.vectorHotstarts > 0);
+        && (method != NCM_DISTRIBUTED_ADMM || result.statistics.vectorHotstarts > 0)
+        && (method != NCM_CENTRALIZED_OSQP || result.statistics.backendIterations > 0);
 }
 
 bool invalidInitialPairIsRejected(
@@ -89,5 +94,9 @@ int main()
     agents.push_back(makeAgent(model, false)); agents.push_back(makeAgent(model, true));
     return invalidInitialPairIsRejected(agents)
         && runMethod(NCM_DISTRIBUTED_ADMM, agents)
-        && runMethod(NCM_CENTRALIZED_SCP, agents) ? 0 : 1;
+        && runMethod(NCM_CENTRALIZED_SCP, agents)
+#ifdef QPOASES_WITH_OSQP
+        && runMethod(NCM_CENTRALIZED_OSQP, agents)
+#endif
+        ? 0 : 1;
 }

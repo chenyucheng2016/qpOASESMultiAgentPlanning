@@ -70,6 +70,8 @@ ENDIF( NOT CMAKE_BUILD_TYPE )
 option(BUILD_SHARED_LIBS "If ON, build shared library instead of static" OFF)
 option(QPOASES_BUILD_EXAMPLES "Build examples." ON)
 option(QPOASES_BUILD_NONLINEAR_TESTS "Build TurboSCP nonlinear tests." ON)
+option(QPOASES_BUILD_OSQP_BACKEND "Build the centralized OSQP SCP backend." OFF)
+set(OSQP_ROOT "" CACHE PATH "Optional OSQP installation prefix")
 option(QPOASES_BUILD_EXTERNAL_BENCHMARKS "Build OSQP, MOSEK, and HPIPM comparisons." OFF)
 option(QPOASES_AVOID_LA_NAMING_CONFLICTS "If ON, avoid to re-defined symbols that conflict with Blas/Lapack provided functions." OFF)
 
@@ -138,6 +140,38 @@ FILE(GLOB SRC src/*.cpp)
 
 # library
 ADD_LIBRARY(qpOASES ${SRC})
+if(QPOASES_BUILD_OSQP_BACKEND)
+    find_path(OSQP_INCLUDE_DIR NAMES osqp/osqp.h
+        HINTS "${OSQP_ROOT}" "$ENV{OSQP_ROOT}"
+        PATH_SUFFIXES include)
+    find_library(OSQP_LIBRARY NAMES osqp libosqp
+        HINTS "${OSQP_ROOT}" "$ENV{OSQP_ROOT}"
+        PATH_SUFFIXES lib .)
+    if(NOT OSQP_INCLUDE_DIR OR NOT OSQP_LIBRARY)
+        message(FATAL_ERROR
+            "QPOASES_BUILD_OSQP_BACKEND=ON requires OSQP. Set OSQP_ROOT.")
+    endif()
+    message(STATUS "OSQP backend: ${OSQP_LIBRARY}")
+    target_include_directories(qpOASES PRIVATE ${OSQP_INCLUDE_DIR})
+    target_compile_definitions(qpOASES PUBLIC QPOASES_WITH_OSQP)
+    if(EXISTS "${OSQP_INCLUDE_DIR}/osqp/osqp_api_types.h")
+        target_compile_definitions(qpOASES PRIVATE QPOASES_OSQP_V1)
+        message(STATUS "OSQP 1.x API detected")
+    endif()
+    target_link_libraries(qpOASES PUBLIC ${OSQP_LIBRARY})
+    if(WIN32)
+        get_filename_component(OSQP_LIBRARY_DIR ${OSQP_LIBRARY} DIRECTORY)
+        find_file(OSQP_RUNTIME_LIBRARY NAMES osqp.dll libosqp.dll
+            HINTS ${OSQP_LIBRARY_DIR} "${OSQP_ROOT}"
+            NO_DEFAULT_PATH)
+        if(OSQP_RUNTIME_LIBRARY)
+            add_custom_command(TARGET qpOASES POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${EXECUTABLE_OUTPUT_PATH}
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${OSQP_RUNTIME_LIBRARY} ${EXECUTABLE_OUTPUT_PATH})
+        endif()
+    endif()
+endif()
 INSTALL(TARGETS qpOASES
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -241,10 +275,55 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     )
     TARGET_LINK_LIBRARIES(test_nonlinear_static_obstacles qpOASES)
     add_test(NAME nonlinear_static_obstacles COMMAND test_nonlinear_static_obstacles)
+    ADD_EXECUTABLE(test_nonlinear_continuation tests/test_nonlinear_continuation.cpp)
+    TARGET_LINK_LIBRARIES(test_nonlinear_continuation qpOASES)
+    add_test(NAME nonlinear_continuation COMMAND test_nonlinear_continuation)
     ADD_CUSTOM_TARGET(nonlinear_heterogeneous_benchmark
         COMMAND $<TARGET_FILE:test_heterogeneous_three_agent>
             --csv ${CMAKE_BINARY_DIR}/heterogeneous_benchmark.csv
         DEPENDS test_heterogeneous_three_agent)
+    ADD_EXECUTABLE(nonlinear_benchmark benchmarks/nonlinear_benchmark.cpp)
+    TARGET_LINK_LIBRARIES(nonlinear_benchmark qpOASES)
+    add_test(
+        NAME nonlinear_manual_full
+        COMMAND nonlinear_benchmark
+            --suite manual --method full --require-success
+            --output ${CMAKE_BINARY_DIR}/nonlinear_manual_full.csv
+    )
+    set_tests_properties(nonlinear_manual_full PROPERTIES TIMEOUT 600)
+    add_test(
+        NAME nonlinear_benchmark_scenario_index
+        COMMAND nonlinear_benchmark
+            --suite smoke --scenario-index 23 --dry-run
+            --output ${CMAKE_BINARY_DIR}/nonlinear_scenario_index.csv
+    )
+    set_tests_properties(nonlinear_benchmark_scenario_index PROPERTIES TIMEOUT 30)
+    add_test(
+        NAME nonlinear_terminal_accuracy_regression
+        COMMAND nonlinear_benchmark
+            --suite smoke --scenario-index 23 --method full --require-success
+            --output ${CMAKE_BINARY_DIR}/nonlinear_terminal_accuracy_regression.csv
+    )
+    set_tests_properties(nonlinear_terminal_accuracy_regression PROPERTIES TIMEOUT 120)
+    add_test(
+        NAME nonlinear_centralized_qpoases_easy
+        COMMAND nonlinear_benchmark
+            --suite manual --case easy_open --method centralized_qpoases
+            --require-success
+            --output ${CMAKE_BINARY_DIR}/nonlinear_centralized_qpoases_easy.csv
+    )
+    set_tests_properties(nonlinear_centralized_qpoases_easy PROPERTIES TIMEOUT 60)
+    ADD_CUSTOM_TARGET(nonlinear_benchmark_smoke
+        COMMAND $<TARGET_FILE:nonlinear_benchmark>
+            --suite smoke --method full
+            --output ${CMAKE_BINARY_DIR}/nonlinear_benchmark_smoke.csv
+        DEPENDS nonlinear_benchmark)
+    ADD_CUSTOM_TARGET(nonlinear_benchmark_ci
+        COMMAND $<TARGET_FILE:nonlinear_benchmark>
+            --suite ci --method all
+            --output ${CMAKE_BINARY_DIR}/nonlinear_benchmark_ci.csv
+        DEPENDS nonlinear_benchmark)
+
 endif()
 
 if(QPOASES_BUILD_EXTERNAL_BENCHMARKS)

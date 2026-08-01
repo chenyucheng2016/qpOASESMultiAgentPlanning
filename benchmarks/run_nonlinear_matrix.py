@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Run nonlinear benchmarks one scenario at a time with resume and timeouts."""
+
+import argparse
+import csv
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+METHODS = (
+    "cold",
+    "inner",
+    "qp_continuation",
+    "full",
+    "centralized_qpoases",
+    "centralized_osqp",
+)
+MANUAL_CASES = (
+    "easy_open",
+    "easy_single_blocker",
+    "medium_doorway",
+    "medium_heterogeneous_open",
+    "hard_heterogeneous_doorway",
+    "hard_warehouse",
+    "very_hard_maze",
+)
+STATUS_FIELDS = (
+    "suite",
+    "track",
+    "selector",
+    "method",
+    "repetition",
+    "execution_status",
+    "return_code",
+    "wall_time_seconds",
+    "result_file",
+    "log_file",
+    "message",
+)
+
+
+def parse_methods(value):
+    methods = tuple(item.strip() for item in value.split(",") if item.strip())
+    unknown = sorted(set(methods) - set(METHODS))
+    if unknown:
+        raise argparse.ArgumentTypeError("unknown methods: " + ", ".join(unknown))
+    return methods
+
+def parse_indices(value):
+    try:
+        indices = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("scenario indices must be comma-separated integers") from error
+    if not indices or any(index < 0 for index in indices):
+        raise argparse.ArgumentTypeError("scenario indices must be nonnegative")
+    return indices
+
+
+def read_single_result(path):
+    try:
+        with path.open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+    except (OSError, csv.Error):
+        return None
+    return rows[0] if len(rows) == 1 else None
+
+
+def discover_count(executable, suite, track, output_dir):
+    inventory = output_dir / "inventory.csv"
+    command = [
+        str(executable), "--suite", suite, "--track", track,
+        "--dry-run", "--output", str(inventory),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    match = re.search(r"generated (\d+) scenarios", completed.stdout)
+    if completed.returncode != 0 or not match:
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        raise RuntimeError("could not discover scenario count: " + detail)
+    return int(match.group(1))
+
+
+def read_statuses(path):
+    if not path.exists():
+        return {}
+    with path.open(newline="", encoding="utf-8") as stream:
+        return {
+            (row["selector"], row["method"], int(row.get("repetition") or "1")): row
+            for row in csv.DictReader(stream)
+        }
+
+
+def write_statuses(path, statuses):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=STATUS_FIELDS)
+        writer.writeheader()
+        for key in sorted(statuses):
+            writer.writerow(statuses[key])
+    os.replace(temporary, path)
+
+
+def combine_results(path, tasks, statuses):
+    rows = []
+    fields = None
+    for selector, method, repetition, result_path, _ in tasks:
+        row = read_single_result(result_path)
+        if row is None:
+            continue
+        status = statuses.get((selector, method, repetition), {})
+        row["repetition"] = repetition
+        row["execution_status"] = status.get("execution_status", "completed")
+        row["wall_time_seconds"] = status.get("wall_time_seconds", "")
+        fields = list(row)
+        rows.append(row)
+    if fields is None:
+        return
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(temporary, path)
+
+
+def status_record(arguments, selector, method, repetition, state, return_code, elapsed, result_path, log_path, message):
+    return {
+        "suite": arguments.suite,
+        "track": arguments.track,
+        "selector": selector,
+        "method": method,
+        "repetition": repetition,
+        "execution_status": state,
+        "return_code": return_code,
+        "wall_time_seconds": f"{elapsed:.6f}",
+        "result_file": str(result_path),
+        "log_file": str(log_path),
+        "message": message,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("executable", type=Path)
+    parser.add_argument("--suite", default="manual",
+                        choices=("manual", "ci", "smoke", "development", "final"))
+    parser.add_argument("--track", default="all",
+                        choices=("all", "scaling", "models", "families"))
+    parser.add_argument("--scenario-indices", type=parse_indices, default=(),
+                        help="optional comma-separated scenario indices")
+    parser.add_argument("--methods", type=parse_methods, default=METHODS)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--combined", default="results.csv")
+    parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--threads", type=int, default=0,
+                        help="positive fixed thread count; zero uses the frozen automatic policy")
+    parser.add_argument("--repetitions", type=int, default=1,
+                        help="number of independent process executions per scenario-method pair")
+    parser.add_argument("--rerun-failures", action="store_true")
+    arguments = parser.parse_args()
+
+    executable = arguments.executable.resolve()
+    if not executable.is_file():
+        parser.error(f"benchmark executable not found: {executable}")
+    if arguments.timeout_seconds <= 0.0:
+        parser.error("--timeout-seconds must be positive")
+    if arguments.threads < 0:
+        parser.error("--threads must be nonnegative")
+    if arguments.repetitions <= 0:
+        parser.error("--repetitions must be positive")
+
+    output_dir = arguments.output_dir.resolve()
+    run_dir = output_dir / "runs"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    status_path = output_dir / "execution_status.csv"
+    combined_path = output_dir / arguments.combined
+    statuses = read_statuses(status_path)
+
+    if arguments.suite == "manual":
+        if arguments.scenario_indices:
+            parser.error("--scenario-indices is only valid for generated suites")
+        selectors = tuple((case_id, ("--case", case_id)) for case_id in MANUAL_CASES)
+    else:
+        count = discover_count(executable, arguments.suite, arguments.track, output_dir)
+        indices = arguments.scenario_indices or tuple(range(count))
+        if any(index >= count for index in indices):
+            parser.error(f"scenario index must be smaller than {count}")
+        width = max(3, len(str(max(0, count - 1))))
+        selectors = tuple(
+            (f"scenario_{index:0{width}d}", ("--scenario-index", str(index)))
+            for index in indices
+        )
+
+    tasks = []
+    for selector, selector_arguments in selectors:
+        for method in arguments.methods:
+            for repetition in range(1, arguments.repetitions + 1):
+                suffix = "" if arguments.repetitions == 1 else f"__rep_{repetition:02d}"
+                result_path = run_dir / f"{selector}__{method}{suffix}.csv"
+                tasks.append((selector, method, repetition, result_path, selector_arguments))
+
+    total = len(tasks)
+    environment = os.environ.copy()
+    environment["OMP_DYNAMIC"] = "FALSE"
+    environment["OMP_PROC_BIND"] = "close"
+    environment["OMP_PLACES"] = "cores"
+    for index, (selector, method, repetition, result_path, selector_arguments) in enumerate(tasks, 1):
+        key = (selector, method, repetition)
+        existing = read_single_result(result_path)
+        if existing is not None:
+            if key not in statuses or statuses[key].get("execution_status") != "completed":
+                log_path = result_path.with_suffix(".log")
+                statuses[key] = status_record(
+                    arguments, selector, method, repetition, "completed", 0, 0.0,
+                    result_path, log_path, "resumed result"
+                )
+                write_statuses(status_path, statuses)
+            print(f"[{index}/{total}] resume {selector} {method}", flush=True)
+            continue
+        previous = statuses.get(key)
+        if previous and previous.get("execution_status") != "completed" and not arguments.rerun_failures:
+            print(f"[{index}/{total}] skip {selector} {method} ({previous['execution_status']})", flush=True)
+            continue
+
+        partial = result_path.with_suffix(".partial.csv")
+        log_path = result_path.with_suffix(".log")
+        command = [
+            str(executable), "--suite", arguments.suite, "--track", arguments.track,
+            "--method", method, "--output", str(partial),
+        ]
+        if arguments.threads > 0:
+            command += ["--threads", str(arguments.threads)]
+        command += list(selector_arguments)
+        print(f"[{index}/{total}] run {selector} {method}", flush=True)
+        started = time.monotonic()
+        try:
+            with log_path.open("wb") as log_stream:
+                completed = subprocess.run(
+                    command,
+                    stdout=log_stream,
+                    stderr=subprocess.STDOUT,
+                    timeout=arguments.timeout_seconds,
+                    check=False,
+                    env=environment,
+                )
+            elapsed = time.monotonic() - started
+            row = read_single_result(partial)
+            if completed.returncode == 0 and row is not None:
+                os.replace(partial, result_path)
+                state = "completed"
+                message = "completed"
+            else:
+                state = "error"
+                message = "process failed or did not produce exactly one result row"
+            statuses[key] = status_record(
+                arguments, selector, method, repetition, state, completed.returncode,
+                elapsed, result_path, log_path, message,
+            )
+        except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - started
+            statuses[key] = status_record(
+                arguments, selector, method, repetition, "timeout", "", elapsed,
+                result_path, log_path, f"exceeded {arguments.timeout_seconds:g} seconds",
+            )
+        write_statuses(status_path, statuses)
+        combine_results(combined_path, tasks, statuses)
+        print(f"  {statuses[key]['execution_status']} in {elapsed:.2f} s", flush=True)
+
+    combine_results(combined_path, tasks, statuses)
+    counts = {state: 0 for state in ("completed", "timeout", "error")}
+    for selector, method, repetition, _, _ in tasks:
+        state = statuses.get((selector, method, repetition), {}).get("execution_status", "error")
+        counts[state] = counts.get(state, 0) + 1
+    print(
+        f"completed={counts.get('completed', 0)} timeout={counts.get('timeout', 0)} "
+        f"error={counts.get('error', 0)} combined={combined_path}",
+        flush=True,
+    )
+    return 0 if counts.get("completed", 0) == total else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

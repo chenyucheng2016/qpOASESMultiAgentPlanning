@@ -1,4 +1,5 @@
 #include <qpOASES/NonlinearTurboADMM.hpp>
+#include <qpOASES/NonlinearTrajectoryValidator.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -179,6 +180,12 @@ bool runMethod(
         obstacles,
         options
     );
+    NonlinearValidationOptions validationOptions;
+    validationOptions.interpolationSubsteps = 20;
+    validationOptions.terminalPositionTolerance = 0.5;
+    const NonlinearValidationResult validation = validateNonlinearTrajectories(
+        agents, obstacles, result.trajectories, options, validationOptions
+    );
     if (result.trajectories.size() != agents.size()) return false;
     const real_t terminalError = finalPositionError(
         agents[0],
@@ -194,6 +201,7 @@ bool runMethod(
         terminalError
     );
     return result.success
+        && validation.success
         && result.statistics.minimumObstacleDistance >= 0.29
         && result.statistics.minimumObstacleClearance >= -0.01
         && result.statistics.maximumDynamicsDefect <= 1.0e-9
@@ -218,16 +226,27 @@ bool runHeterogeneous(
         obstacles,
         options
     );
+    NonlinearValidationOptions validationOptions;
+    validationOptions.interpolationSubsteps = 20;
+    validationOptions.terminalPositionTolerance = 2.0;
+    const NonlinearValidationResult validation = validateNonlinearTrajectories(
+        agents, obstacles, result.trajectories, options, validationOptions
+    );
     std::printf(
-        "heterogeneous obstacle: %s, pair %.3f, pair margin %.3f, distance %.3f, obstacle margin %.3f, defect %.3e\n",
+        "heterogeneous obstacle: %s, pair %.3f, pair margin %.3f, distance %.3f, obstacle margin %.3f, defect %.3e, validation %s pair %.3f obstacle %.3f terminal %.3f\n",
         result.status.c_str(),
         result.statistics.minimumDistance,
         result.statistics.minimumPairwiseClearance,
         result.statistics.minimumObstacleDistance,
         result.statistics.minimumObstacleClearance,
-        result.statistics.maximumDynamicsDefect
+        result.statistics.maximumDynamicsDefect,
+        validation.status.c_str(),
+        validation.minimumPairwiseClearance,
+        validation.minimumObstacleClearance,
+        validation.maximumTerminalPositionError
     );
     return result.success
+        && validation.success
         && result.trajectories.size() == agents.size()
         && result.statistics.minimumDistance >= 0.79
         && result.statistics.minimumPairwiseClearance >= -0.01

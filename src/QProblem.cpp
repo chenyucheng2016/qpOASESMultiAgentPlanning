@@ -1771,7 +1771,8 @@ returnValue QProblem::solveQP(	const real_t* const g_new,
 	/* DIAGNOSTIC: Log internal state before hotstart (first call only) */
 	#ifndef __SUPPRESSANYOUTPUT__
 	static int hotstart_log_count = 0;
-	if ( hotstart_log_count < 2 && isFirstCall == BT_TRUE )
+	if ( hotstart_log_count < 2 && isFirstCall == BT_TRUE
+		&& options.printLevel == PL_HIGH )
 	{
 		printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 		printf("[HOTSTART DIAGNOSTIC] Internal state before hotstart\n");

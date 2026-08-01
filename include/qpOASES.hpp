@@ -72,5 +72,6 @@
 #include <qpOASES/NonlinearModel.hpp>
 #include <qpOASES/StageVaryingRiccati.hpp>
 #include <qpOASES/NonlinearTurboADMM.hpp>
+#include <qpOASES/NonlinearTrajectoryValidator.hpp>
 
 #endif

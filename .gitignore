@@ -1,1 +1,4 @@
 /*.mex
+/benchmarks/__pycache__/
+/build-ral-current/
+/build-ral-wsl/

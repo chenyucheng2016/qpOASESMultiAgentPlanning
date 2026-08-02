@@ -20,6 +20,19 @@ public:
     ) const = 0;
     virtual void position(const real_t* x, real_t* p) const = 0;
     virtual void linearizePosition(const real_t* x, real_t* C) const = 0;
+    /** Position of a body-fixed planar collision point. */
+    virtual void collisionPoint(
+        const real_t* x,
+        real_t longitudinalOffset,
+        real_t lateralOffset,
+        real_t* p
+    ) const;
+    virtual void linearizeCollisionPoint(
+        const real_t* x,
+        real_t longitudinalOffset,
+        real_t lateralOffset,
+        real_t* C
+    ) const;
 };
 
 /**
@@ -59,6 +72,43 @@ public:
     ) const;
     void position(const real_t* x, real_t* p) const;
     void linearizePosition(const real_t* x, real_t* C) const;
+    real_t timeStep() const;
+    real_t wheelbaseLength() const;
+
+private:
+    real_t dt;
+    real_t wheelbase;
+};
+
+/**
+ * CSDO-compatible front-steering model. State is
+ * [px, py, heading, steering] and control is [speed, steering_rate].
+ */
+class FrontSteeringModel : public NonlinearModel
+{
+public:
+    FrontSteeringModel(real_t timeStep, real_t wheelbase);
+    int_t stateDimension() const;
+    int_t controlDimension() const;
+    int_t positionDimension() const;
+    void dynamics(const real_t* x, const real_t* u, real_t* xNext) const;
+    void linearizeDynamics(
+        const real_t* x, const real_t* u, real_t* A, real_t* B
+    ) const;
+    void position(const real_t* x, real_t* p) const;
+    void linearizePosition(const real_t* x, real_t* C) const;
+    void collisionPoint(
+        const real_t* x,
+        real_t longitudinalOffset,
+        real_t lateralOffset,
+        real_t* p
+    ) const;
+    void linearizeCollisionPoint(
+        const real_t* x,
+        real_t longitudinalOffset,
+        real_t lateralOffset,
+        real_t* C
+    ) const;
     real_t timeStep() const;
     real_t wheelbaseLength() const;
 

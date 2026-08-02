@@ -60,14 +60,48 @@ real_t maximumJacobianError(
     return maximum;
 }
 
+real_t maximumCollisionPointJacobianError(
+    const NonlinearModel& model,
+    const std::vector<real_t>& state,
+    real_t longitudinalOffset,
+    real_t lateralOffset)
+{
+    const int_t nx = model.stateDimension();
+    const int_t np = model.positionDimension();
+    const real_t epsilon = 1.0e-7;
+    std::vector<real_t> C(np * nx, 0.0);
+    std::vector<real_t> base(np, 0.0), shifted(np, 0.0), x(state);
+    model.collisionPoint(
+        &state[0], longitudinalOffset, lateralOffset, &base[0]);
+    model.linearizeCollisionPoint(
+        &state[0], longitudinalOffset, lateralOffset, &C[0]);
+    real_t maximum = 0.0;
+    for (int_t column = 0; column < nx; ++column)
+    {
+        x[column] += epsilon;
+        model.collisionPoint(
+            &x[0], longitudinalOffset, lateralOffset, &shifted[0]);
+        x[column] -= epsilon;
+        for (int_t row = 0; row < np; ++row)
+            maximum = std::max(maximum, std::fabs(
+                (shifted[row] - base[row]) / epsilon
+                - C[row * nx + column]
+            ));
+    }
+    return maximum;
+}
+
 }
 
 int main()
 {
     BicycleModel bicycle(0.13, 2.7);
+    FrontSteeringModel frontSteering(0.13, 2.7);
     QuadcopterModel quadcopter(0.08, 1.3, 9.81);
     const real_t bicycleStateData[] = {1.1, -0.7, 0.62, 3.2, 0.21};
     const real_t bicycleControlData[] = {-0.4, 0.17};
+    const real_t frontSteeringStateData[] = {1.1, -0.7, 0.62, 0.21};
+    const real_t frontSteeringControlData[] = {3.2, 0.17};
     const real_t quadStateData[] = {
         0.3, -1.2, 2.4, 0.7, -0.2, 0.15, 0.17, -0.13, 0.41
     };
@@ -77,12 +111,26 @@ int main()
         std::vector<real_t>(bicycleStateData, bicycleStateData + 5),
         std::vector<real_t>(bicycleControlData, bicycleControlData + 2)
     );
+    const std::vector<real_t> frontSteeringState(
+        frontSteeringStateData, frontSteeringStateData + 4);
+    const real_t frontSteeringError = maximumJacobianError(
+        frontSteering,
+        frontSteeringState,
+        std::vector<real_t>(
+            frontSteeringControlData, frontSteeringControlData + 2)
+    );
+    const real_t collisionPointError = maximumCollisionPointJacobianError(
+        frontSteering, frontSteeringState, 1.25, -0.2);
     const real_t quadcopterError = maximumJacobianError(
         quadcopter,
         std::vector<real_t>(quadStateData, quadStateData + 9),
         std::vector<real_t>(quadControlData, quadControlData + 4)
     );
-    std::printf("bicycle Jacobian error %.3e, quadcopter Jacobian error %.3e\n",
-        bicycleError, quadcopterError);
-    return bicycleError <= 1.0e-6 && quadcopterError <= 1.0e-6 ? 0 : 1;
+    std::printf(
+        "bicycle %.3e, front steering %.3e, collision point %.3e, quadcopter %.3e\n",
+        bicycleError, frontSteeringError, collisionPointError, quadcopterError);
+    return bicycleError <= 1.0e-6
+        && frontSteeringError <= 1.0e-6
+        && collisionPointError <= 1.0e-6
+        && quadcopterError <= 1.0e-6 ? 0 : 1;
 }

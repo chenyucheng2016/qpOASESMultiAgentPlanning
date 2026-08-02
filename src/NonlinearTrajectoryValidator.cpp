@@ -18,10 +18,31 @@ real_t collisionRadius(
         ? agent.collisionRadius : 0.5 * options.safetyDistance;
 }
 
-real_t obstacleClearance(
+int_t collisionCircleCount(const NonlinearAgentProblem& agent)
+{
+    return agent.collisionCircles.empty()
+        ? 1 : static_cast<int_t>(agent.collisionCircles.size());
+}
+
+real_t circleRadius(
     const NonlinearAgentProblem& agent,
+    int_t circle,
     const NonlinearTurboOptions& options)
 {
+    return agent.collisionCircles.empty()
+        ? collisionRadius(agent, options)
+        : agent.collisionCircles[circle].radius;
+}
+
+real_t obstacleClearance(
+    const NonlinearAgentProblem& agent,
+    int_t circle,
+    const NonlinearTurboOptions& options)
+{
+    const real_t extra = agent.obstacleSafetyDistance >= 0.0
+        ? agent.obstacleSafetyDistance : options.obstacleSafetyDistance;
+    if (!agent.collisionCircles.empty())
+        return agent.collisionCircles[circle].radius + extra;
     return agent.obstacleSafetyDistance >= 0.0
         ? agent.obstacleSafetyDistance : options.obstacleSafetyDistance;
 }
@@ -37,15 +58,26 @@ int_t worldDimension(const std::vector<NonlinearAgentProblem>& agents)
 void positionAt(
     const NonlinearAgentProblem& agent,
     const NonlinearTrajectory& trajectory,
+    int_t circle,
     int_t stage,
     int_t dimension,
     std::vector<real_t>& position)
 {
     position.assign(dimension, 0.0);
-    agent.model->position(
-        &trajectory.states[stage * agent.model->stateDimension()],
-        &position[0]
-    );
+    const real_t* state =
+        &trajectory.states[stage * agent.model->stateDimension()];
+    if (agent.collisionCircles.empty())
+        agent.model->position(state, &position[0]);
+    else
+    {
+        const CollisionCircle& geometry = agent.collisionCircles[circle];
+        agent.model->collisionPoint(
+            state,
+            geometry.longitudinalOffset,
+            geometry.lateralOffset,
+            &position[0]
+        );
+    }
 }
 
 real_t polygonAreaTwice(const ConvexPolygonObstacle& obstacle)
@@ -133,6 +165,21 @@ bool validInput(
             error = "trajectory dimensions are inconsistent";
             return false;
         }
+        if (!agents[a].collisionCircles.empty()
+            && agents[a].model->positionDimension() != 2)
+        {
+            error = "body-fixed collision circles require a planar model";
+            return false;
+        }
+        for (std::size_t circle = 0;
+             circle < agents[a].collisionCircles.size();
+             ++circle)
+            if (!std::isfinite(agents[a].collisionCircles[circle].radius)
+                || agents[a].collisionCircles[circle].radius <= 0.0)
+            {
+                error = "validator received an invalid collision circle";
+                return false;
+            }
     }
     for (std::size_t obstacle = 0; obstacle < obstacles.size(); ++obstacle)
     {
@@ -232,14 +279,25 @@ NonlinearValidationResult validateNonlinearTrajectories(
         );
     }
 
-    std::vector<std::vector<real_t> > start(agents.size());
-    std::vector<std::vector<real_t> > finish(agents.size());
+    std::vector<std::vector<std::vector<real_t> > > start(agents.size());
+    std::vector<std::vector<std::vector<real_t> > > finish(agents.size());
     for (int_t k = 0; k < horizon; ++k)
     {
         for (std::size_t a = 0; a < agents.size(); ++a)
         {
-            positionAt(agents[a], trajectories[a], k, dimension, start[a]);
-            positionAt(agents[a], trajectories[a], k + 1, dimension, finish[a]);
+            start[a].resize(collisionCircleCount(agents[a]));
+            finish[a].resize(collisionCircleCount(agents[a]));
+            for (int_t circle = 0;
+                 circle < collisionCircleCount(agents[a]);
+                 ++circle)
+            {
+                positionAt(
+                    agents[a], trajectories[a], circle, k,
+                    dimension, start[a][circle]);
+                positionAt(
+                    agents[a], trajectories[a], circle, k + 1,
+                    dimension, finish[a][circle]);
+            }
         }
         for (int_t substep = 0; substep <= validationOptions.interpolationSubsteps; ++substep)
         {
@@ -247,33 +305,49 @@ NonlinearValidationResult validateNonlinearTrajectories(
                 / validationOptions.interpolationSubsteps;
             for (std::size_t first = 0; first < agents.size(); ++first)
             for (std::size_t second = first + 1; second < agents.size(); ++second)
+            for (int_t firstCircle = 0;
+                 firstCircle < collisionCircleCount(agents[first]);
+                 ++firstCircle)
+            for (int_t secondCircle = 0;
+                 secondCircle < collisionCircleCount(agents[second]);
+                 ++secondCircle)
             {
                 real_t distanceSquared = 0.0;
                 for (int_t i = 0; i < dimension; ++i)
                 {
-                    const real_t firstPosition = start[first][i]
-                        + alpha * (finish[first][i] - start[first][i]);
-                    const real_t secondPosition = start[second][i]
-                        + alpha * (finish[second][i] - start[second][i]);
+                    const real_t firstPosition = start[first][firstCircle][i]
+                        + alpha * (finish[first][firstCircle][i]
+                            - start[first][firstCircle][i]);
+                    const real_t secondPosition = start[second][secondCircle][i]
+                        + alpha * (finish[second][secondCircle][i]
+                            - start[second][secondCircle][i]);
                     const real_t difference = firstPosition - secondPosition;
                     distanceSquared += difference * difference;
                 }
                 result.minimumPairwiseClearance = std::min(
                     result.minimumPairwiseClearance,
                     std::sqrt(distanceSquared)
-                        - collisionRadius(agents[first], solverOptions)
-                        - collisionRadius(agents[second], solverOptions)
+                        - circleRadius(
+                            agents[first], firstCircle, solverOptions)
+                        - circleRadius(
+                            agents[second], secondCircle, solverOptions)
                 );
             }
             for (std::size_t a = 0; a < agents.size(); ++a)
+            for (int_t circle = 0;
+                 circle < collisionCircleCount(agents[a]);
+                 ++circle)
             for (std::size_t obstacle = 0; obstacle < obstacles.size(); ++obstacle)
             {
-                const real_t px = start[a][0] + alpha * (finish[a][0] - start[a][0]);
-                const real_t py = start[a][1] + alpha * (finish[a][1] - start[a][1]);
+                const real_t px = start[a][circle][0] + alpha
+                    * (finish[a][circle][0] - start[a][circle][0]);
+                const real_t py = start[a][circle][1] + alpha
+                    * (finish[a][circle][1] - start[a][circle][1]);
                 result.minimumObstacleClearance = std::min(
                     result.minimumObstacleClearance,
                     signedPolygonDistance(px, py, obstacles[obstacle])
-                        - obstacleClearance(agents[a], solverOptions)
+                        - obstacleClearance(
+                            agents[a], circle, solverOptions)
                 );
             }
         }

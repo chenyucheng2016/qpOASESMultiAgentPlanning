@@ -4,6 +4,28 @@
 
 BEGIN_NAMESPACE_QPOASES
 
+void NonlinearModel::collisionPoint(
+    const real_t* x,
+    real_t longitudinalOffset,
+    real_t lateralOffset,
+    real_t* p
+) const
+{
+    position(x, p);
+    if (positionDimension() >= 1) p[0] += longitudinalOffset;
+    if (positionDimension() >= 2) p[1] += lateralOffset;
+}
+
+void NonlinearModel::linearizeCollisionPoint(
+    const real_t* x,
+    real_t,
+    real_t,
+    real_t* C
+) const
+{
+    linearizePosition(x, C);
+}
+
 UnicycleModel::UnicycleModel(real_t timeStep) : dt(timeStep) {}
 int_t UnicycleModel::stateDimension() const { return 4; }
 int_t UnicycleModel::controlDimension() const { return 2; }
@@ -116,6 +138,99 @@ void BicycleModel::linearizePosition(const real_t*, real_t* C) const
 
 real_t BicycleModel::timeStep() const { return dt; }
 real_t BicycleModel::wheelbaseLength() const { return wheelbase; }
+
+FrontSteeringModel::FrontSteeringModel(
+    real_t timeStep,
+    real_t wheelbaseLength
+) : dt(timeStep), wheelbase(wheelbaseLength) {}
+
+int_t FrontSteeringModel::stateDimension() const { return 4; }
+int_t FrontSteeringModel::controlDimension() const { return 2; }
+int_t FrontSteeringModel::positionDimension() const { return 2; }
+
+void FrontSteeringModel::dynamics(
+    const real_t* x,
+    const real_t* u,
+    real_t* xNext
+) const
+{
+    const real_t heading = x[2];
+    const real_t steering = x[3];
+    const real_t speed = u[0];
+    xNext[0] = x[0] + dt * speed * std::cos(heading);
+    xNext[1] = x[1] + dt * speed * std::sin(heading);
+    xNext[2] = x[2] + dt * speed * std::tan(steering) / wheelbase;
+    xNext[3] = x[3] + dt * u[1];
+}
+
+void FrontSteeringModel::linearizeDynamics(
+    const real_t* x,
+    const real_t* u,
+    real_t* A,
+    real_t* B
+) const
+{
+    const real_t heading = x[2];
+    const real_t steering = x[3];
+    const real_t speed = u[0];
+    const real_t cosineSteering = std::cos(steering);
+    for (int_t i = 0; i < 16; ++i) A[i] = 0.0;
+    for (int_t i = 0; i < 8; ++i) B[i] = 0.0;
+    for (int_t i = 0; i < 4; ++i) A[i * 4 + i] = 1.0;
+    A[2] = -dt * speed * std::sin(heading);
+    A[6] = dt * speed * std::cos(heading);
+    A[11] = dt * speed
+        / (wheelbase * cosineSteering * cosineSteering);
+    B[0] = dt * std::cos(heading);
+    B[2] = dt * std::sin(heading);
+    B[4] = dt * std::tan(steering) / wheelbase;
+    B[7] = dt;
+}
+
+void FrontSteeringModel::position(const real_t* x, real_t* p) const
+{
+    p[0] = x[0];
+    p[1] = x[1];
+}
+
+void FrontSteeringModel::linearizePosition(const real_t*, real_t* C) const
+{
+    for (int_t i = 0; i < 8; ++i) C[i] = 0.0;
+    C[0] = 1.0;
+    C[5] = 1.0;
+}
+
+void FrontSteeringModel::collisionPoint(
+    const real_t* x,
+    real_t longitudinalOffset,
+    real_t lateralOffset,
+    real_t* p
+) const
+{
+    const real_t cosine = std::cos(x[2]);
+    const real_t sine = std::sin(x[2]);
+    p[0] = x[0] + cosine * longitudinalOffset - sine * lateralOffset;
+    p[1] = x[1] + sine * longitudinalOffset + cosine * lateralOffset;
+}
+
+void FrontSteeringModel::linearizeCollisionPoint(
+    const real_t* x,
+    real_t longitudinalOffset,
+    real_t lateralOffset,
+    real_t* C
+) const
+{
+    const real_t cosine = std::cos(x[2]);
+    const real_t sine = std::sin(x[2]);
+    for (int_t i = 0; i < 8; ++i) C[i] = 0.0;
+    C[0] = 1.0;
+    C[2] = -sine * longitudinalOffset - cosine * lateralOffset;
+    C[5] = 1.0;
+    C[6] = cosine * longitudinalOffset - sine * lateralOffset;
+}
+
+real_t FrontSteeringModel::timeStep() const { return dt; }
+real_t FrontSteeringModel::wheelbaseLength() const { return wheelbase; }
 
 QuadcopterModel::QuadcopterModel(
     real_t timeStep, real_t vehicleMassValue, real_t gravityValue

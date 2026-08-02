@@ -1,0 +1,43 @@
+statistics:
+  runtime: 0.0
+schedule:
+  agent0:
+    - x: 5.0
+      y: 5.0
+      yaw: 0.0
+      steer: 0.0
+      t: 0
+      v: 1.0
+      omega: 0.0
+    - x: 5.8825
+      y: 5.0
+      yaw: 0.0
+      steer: 0.0
+      t: 1
+      v: 1.0
+      omega: 0.0
+    - x: 6.765
+      y: 5.0
+      yaw: 0.0
+      steer: 0.0
+      t: 2
+  agent1:
+    - x: 5.0
+      y: 7.6
+      yaw: 0.0
+      steer: 0.0
+      t: 0
+      v: 1.0
+      omega: 0.0
+    - x: 5.8825
+      y: 7.6
+      yaw: 0.0
+      steer: 0.0
+      t: 1
+      v: 1.0
+      omega: 0.0
+    - x: 6.765
+      y: 7.6
+      yaw: 0.0
+      steer: 0.0
+      t: 2

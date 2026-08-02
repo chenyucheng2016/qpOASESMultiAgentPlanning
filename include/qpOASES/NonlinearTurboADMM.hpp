@@ -33,6 +33,16 @@ struct ConvexPolygonObstacle
     std::vector<real_t> vertices;
 };
 
+/** Planar body-fixed collision circle used for non-circular vehicles. */
+struct CollisionCircle
+{
+    real_t longitudinalOffset;
+    real_t lateralOffset;
+    real_t radius;
+    CollisionCircle();
+    CollisionCircle(real_t longitudinal, real_t lateral, real_t radiusValue);
+};
+
 struct NonlinearAgentProblem
 {
     const NonlinearModel* model;
@@ -49,11 +59,18 @@ struct NonlinearAgentProblem
     std::vector<real_t> stateWeights;
     std::vector<real_t> terminalWeights;
     std::vector<real_t> controlWeights;
+    /** Optional weights on successive control differences. */
+    std::vector<real_t> controlDifferenceWeights;
     std::vector<real_t> stateLowerBounds;
     std::vector<real_t> stateUpperBounds;
     std::vector<real_t> controlLowerBounds;
     std::vector<real_t> controlUpperBounds;
     std::vector<real_t> initialControls;
+    std::vector<CollisionCircle> collisionCircles;
+    /** Fix every terminal state component to the final state reference. */
+    bool enforceTerminalState;
+    /** Optional per-state mask used when enforceTerminalState is true. */
+    std::vector<bool> terminalStateConstraintMask;
     NonlinearAgentProblem();
 };
 

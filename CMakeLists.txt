@@ -71,6 +71,7 @@ option(BUILD_SHARED_LIBS "If ON, build shared library instead of static" OFF)
 option(QPOASES_BUILD_EXAMPLES "Build examples." ON)
 option(QPOASES_BUILD_NONLINEAR_TESTS "Build TurboSCP nonlinear tests." ON)
 option(QPOASES_BUILD_OSQP_BACKEND "Build the centralized OSQP SCP backend." OFF)
+option(QPOASES_BUILD_CSDO_COMPARISON "Build the external CSDO warm-start comparison bridge." OFF)
 set(OSQP_ROOT "" CACHE PATH "Optional OSQP installation prefix")
 option(QPOASES_BUILD_EXTERNAL_BENCHMARKS "Build OSQP, MOSEK, and HPIPM comparisons." OFF)
 option(QPOASES_AVOID_LA_NAMING_CONFLICTS "If ON, avoid to re-defined symbols that conflict with Blas/Lapack provided functions." OFF)
@@ -242,6 +243,15 @@ if (QPOASES_BUILD_EXAMPLES)
     ENDFOREACH(ELEMENT ${EXAMPLE_NAMES})
 endif(QPOASES_BUILD_EXAMPLES)
 
+if(QPOASES_BUILD_CSDO_COMPARISON)
+    find_package(yaml-cpp REQUIRED)
+    ADD_EXECUTABLE(
+        csdo_turbo_comparison
+        benchmarks/csdo_turbo_comparison.cpp
+    )
+    TARGET_LINK_LIBRARIES(csdo_turbo_comparison qpOASES yaml-cpp)
+endif()
+
 ############################################################
 ######################### tests ###########################
 ############################################################
@@ -275,6 +285,21 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     )
     TARGET_LINK_LIBRARIES(test_nonlinear_static_obstacles qpOASES)
     add_test(NAME nonlinear_static_obstacles COMMAND test_nonlinear_static_obstacles)
+    ADD_EXECUTABLE(
+        test_nonlinear_collision_footprints
+        tests/test_nonlinear_collision_footprints.cpp
+    )
+    TARGET_LINK_LIBRARIES(test_nonlinear_collision_footprints qpOASES)
+    add_test(NAME nonlinear_collision_footprints COMMAND test_nonlinear_collision_footprints)
+    if(QPOASES_BUILD_CSDO_COMPARISON)
+        add_test(
+            NAME csdo_turbo_bridge_smoke
+            COMMAND csdo_turbo_comparison
+                --input ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_input.yaml
+                --guess ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_guesses.yaml
+                --output ${CMAKE_BINARY_DIR}/csdo_smoke_result.yaml
+        )
+    endif()
     ADD_EXECUTABLE(test_nonlinear_continuation tests/test_nonlinear_continuation.cpp)
     TARGET_LINK_LIBRARIES(test_nonlinear_continuation qpOASES)
     add_test(NAME nonlinear_continuation COMMAND test_nonlinear_continuation)

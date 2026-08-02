@@ -32,13 +32,28 @@ struct AgentQp
 
 struct PairData
 {
-    int_t first, second;
+    int_t first, second, firstCircle, secondCircle;
     int_t samplesPerInterval;
     real_t safetyDistance;
     std::vector<real_t> normal, firstPosition, secondPosition;
     std::vector<real_t> firstAuxiliary, secondAuxiliary;
     std::vector<real_t> firstDual, secondDual;
     std::vector<real_t> previousFirstAuxiliary, previousSecondAuxiliary;
+    std::vector<real_t> firstC, firstD, secondC, secondD;
+};
+
+struct ActiveObstacle
+{
+    std::size_t obstacle;
+    int_t circle;
+    real_t requiredDistance;
+};
+
+struct CollisionLinearization
+{
+    std::vector<real_t> positions;
+    std::vector<real_t> C;
+    std::vector<real_t> D;
 };
 
 struct SolverPool
@@ -220,6 +235,14 @@ struct ObstacleBypass
     }
 };
 
+void worldCollisionPosition(
+    const NonlinearAgentProblem& agent,
+    int_t circle,
+    const real_t* state,
+    int_t worldDimension,
+    real_t* position
+);
+
 real_t polygonSupport(
     const ConvexPolygonObstacle& obstacle,
     const real_t* normal
@@ -239,6 +262,7 @@ real_t polygonSupport(
 
 ObstacleBypass buildObstacleBypass(
     const NonlinearAgentProblem& agent,
+    int_t circle,
     const ConvexPolygonObstacle& obstacle,
     real_t requiredDistance
 )
@@ -248,10 +272,13 @@ ObstacleBypass buildObstacleBypass(
     const int_t np = agent.model->positionDimension();
     std::vector<real_t> position(np, 0.0);
     real_t start[2], goal[2];
-    agent.model->position(&agent.stateReference[0], &position[0]);
+    worldCollisionPosition(
+        agent, circle, &agent.stateReference[0], np, &position[0]);
     start[0] = position[0]; start[1] = position[1];
-    agent.model->position(
+    worldCollisionPosition(
+        agent, circle,
         &agent.stateReference[agent.horizon * nx],
+        np,
         &position[0]
     );
     goal[0] = position[0]; goal[1] = position[1];
@@ -269,8 +296,10 @@ ObstacleBypass buildObstacleBypass(
     bool intersects = false;
     for (int_t k = 0; k <= agent.horizon; ++k)
     {
-        agent.model->position(
+        worldCollisionPosition(
+            agent, circle,
             &agent.stateReference[k * nx],
+            np,
             &position[0]
         );
         if (projectToPolygon(
@@ -482,7 +511,9 @@ bool validateProblems(const std::vector<NonlinearAgentProblem>& agents, std::str
             || p.controlReference.size() != static_cast<std::size_t>(N * nu)
             || p.stateWeights.size() != static_cast<std::size_t>(nx)
             || p.terminalWeights.size() != static_cast<std::size_t>(nx)
-            || p.controlWeights.size() != static_cast<std::size_t>(nu))
+            || p.controlWeights.size() != static_cast<std::size_t>(nu)
+            || (!p.controlDifferenceWeights.empty()
+                && p.controlDifferenceWeights.size() != static_cast<std::size_t>(nu)))
         {
             error = "trajectory and weight dimensions are inconsistent";
             return false;
@@ -495,6 +526,37 @@ bool validateProblems(const std::vector<NonlinearAgentProblem>& agents, std::str
         {
             error = "bound or initial-control dimensions are inconsistent";
             return false;
+        }
+        if (!p.terminalStateConstraintMask.empty()
+            && p.terminalStateConstraintMask.size()
+                != static_cast<std::size_t>(nx))
+        {
+            error = "terminal-state constraint mask has the wrong dimension";
+            return false;
+        }
+        for (std::size_t i = 0; i < p.controlDifferenceWeights.size(); ++i)
+            if (!std::isfinite(p.controlDifferenceWeights[i])
+                || p.controlDifferenceWeights[i] < 0.0)
+            {
+                error = "control-difference weights must be finite and nonnegative";
+                return false;
+            }
+        if (!p.collisionCircles.empty() && p.model->positionDimension() != 2)
+        {
+            error = "body-fixed collision circles require a planar model";
+            return false;
+        }
+        for (std::size_t circle = 0; circle < p.collisionCircles.size(); ++circle)
+        {
+            const CollisionCircle& geometry = p.collisionCircles[circle];
+            if (!std::isfinite(geometry.longitudinalOffset)
+                || !std::isfinite(geometry.lateralOffset)
+                || !std::isfinite(geometry.radius)
+                || geometry.radius <= 0.0)
+            {
+                error = "collision circles require finite offsets and positive radii";
+                return false;
+            }
         }
     }
     return true;
@@ -522,6 +584,96 @@ void worldPosition(
 {
     for (int_t i = 0; i < worldDimension; ++i) position[i] = 0.0;
     model.position(state, position);
+}
+
+int_t collisionCircleCount(const NonlinearAgentProblem& agent)
+{
+    return agent.collisionCircles.empty()
+        ? 1 : static_cast<int_t>(agent.collisionCircles.size());
+}
+
+CollisionCircle collisionCircleForAgent(
+    const NonlinearAgentProblem& agent,
+    int_t circle,
+    const NonlinearTurboOptions& options)
+{
+    if (!agent.collisionCircles.empty()) return agent.collisionCircles[circle];
+    return CollisionCircle(0.0, 0.0, collisionRadiusForAgent(agent, options));
+}
+
+real_t obstacleDistanceForCircle(
+    const NonlinearAgentProblem& agent,
+    const CollisionCircle& circle,
+    const NonlinearTurboOptions& options)
+{
+    if (agent.collisionCircles.empty())
+        return obstacleDistanceForAgent(agent, options);
+    const real_t extra = agent.obstacleSafetyDistance >= 0.0
+        ? agent.obstacleSafetyDistance : options.obstacleSafetyDistance;
+    return circle.radius + extra;
+}
+
+void worldCollisionPosition(
+    const NonlinearAgentProblem& agent,
+    int_t circle,
+    const real_t* state,
+    int_t worldDimension,
+    real_t* position)
+{
+    for (int_t i = 0; i < worldDimension; ++i) position[i] = 0.0;
+    if (agent.collisionCircles.empty())
+    {
+        agent.model->position(state, position);
+        return;
+    }
+    const CollisionCircle& geometry = agent.collisionCircles[circle];
+    agent.model->collisionPoint(
+        state,
+        geometry.longitudinalOffset,
+        geometry.lateralOffset,
+        position
+    );
+}
+
+void linearizeCollisionTrajectory(
+    const NonlinearAgentProblem& agent,
+    int_t circle,
+    const std::vector<real_t>& states,
+    int_t worldDimension,
+    CollisionLinearization& linearization)
+{
+    const int_t N = agent.horizon;
+    const int_t nx = agent.model->stateDimension();
+    linearization.positions.assign((N + 1) * worldDimension, 0.0);
+    linearization.C.assign((N + 1) * worldDimension * nx, 0.0);
+    linearization.D.assign((N + 1) * worldDimension, 0.0);
+    for (int_t k = 0; k <= N; ++k)
+    {
+        const real_t* state = &states[k * nx];
+        real_t* position = &linearization.positions[k * worldDimension];
+        real_t* C = &linearization.C[k * worldDimension * nx];
+        worldCollisionPosition(agent, circle, state, worldDimension, position);
+        if (agent.collisionCircles.empty())
+            agent.model->linearizePosition(state, C);
+        else
+        {
+            const CollisionCircle& geometry = agent.collisionCircles[circle];
+            agent.model->linearizeCollisionPoint(
+                state,
+                geometry.longitudinalOffset,
+                geometry.lateralOffset,
+                C
+            );
+        }
+        real_t* D = &linearization.D[k * worldDimension];
+        for (int_t coordinate = 0; coordinate < worldDimension; ++coordinate)
+        {
+            D[coordinate] = position[coordinate];
+            for (int_t stateIndex = 0; stateIndex < nx; ++stateIndex)
+                D[coordinate] -= C[coordinate * nx + stateIndex]
+                    * state[stateIndex];
+        }
+    }
 }
 
 void clampControls(const NonlinearAgentProblem& p, std::vector<real_t>& controls)
@@ -557,7 +709,7 @@ void sampleStages(
     int_t& secondStage,
     real_t& alpha);
 
-std::vector<std::size_t> selectActiveObstacles(
+std::vector<ActiveObstacle> selectActiveObstacles(
     const NonlinearAgentProblem& p,
     const std::vector<real_t>& nominalStates,
     const std::vector<ConvexPolygonObstacle>& obstacles,
@@ -565,39 +717,52 @@ std::vector<std::size_t> selectActiveObstacles(
     real_t activationDistance,
     int_t samplesPerInterval)
 {
-    std::vector<std::size_t> active;
-    if (activationDistance < 0.0)
-    {
-        for (std::size_t obstacle = 0; obstacle < obstacles.size(); ++obstacle)
-            active.push_back(obstacle);
-        return active;
-    }
-
+    std::vector<ActiveObstacle> active;
     const int_t nx = p.model->stateDimension();
-    const int_t np = p.model->positionDimension();
-    std::vector<real_t> knots((p.horizon + 1) * np, 0.0);
-    for (int_t stage = 0; stage <= p.horizon; ++stage)
-        p.model->position(&nominalStates[stage * nx], &knots[stage * np]);
-
-    const real_t threshold = safetyDistance + activationDistance;
+    const int_t worldDimension = p.model->positionDimension();
     const int_t sampleCount = p.horizon * samplesPerInterval;
-    for (std::size_t obstacle = 0; obstacle < obstacles.size(); ++obstacle)
+    for (int_t circle = 0; circle < collisionCircleCount(p); ++circle)
     {
-        bool near = false;
-        for (int_t sample = 0; sample <= sampleCount && !near; ++sample)
+        const real_t requiredDistance = p.collisionCircles.empty()
+            ? safetyDistance : p.collisionCircles[circle].radius + safetyDistance;
+        std::vector<real_t> knots((p.horizon + 1) * worldDimension, 0.0);
+        for (int_t stage = 0; stage <= p.horizon; ++stage)
+            worldCollisionPosition(
+                p,
+                circle,
+                &nominalStates[stage * nx],
+                worldDimension,
+                &knots[stage * worldDimension]
+            );
+
+        for (std::size_t obstacle = 0; obstacle < obstacles.size(); ++obstacle)
         {
-            int_t firstStage = 0, secondStage = 0;
-            real_t alpha = 0.0;
-            sampleStages(sample, samplesPerInterval, p.horizon,
-                firstStage, secondStage, alpha);
-            const real_t x = (1.0 - alpha) * knots[firstStage * np]
-                + alpha * knots[secondStage * np];
-            const real_t y = (1.0 - alpha) * knots[firstStage * np + 1]
-                + alpha * knots[secondStage * np + 1];
-            near = projectToPolygon(x, y, obstacles[obstacle]).signedDistance
-                <= threshold;
+            bool near = activationDistance < 0.0;
+            for (int_t sample = 0; sample <= sampleCount && !near; ++sample)
+            {
+                int_t firstStage = 0, secondStage = 0;
+                real_t alpha = 0.0;
+                sampleStages(sample, samplesPerInterval, p.horizon,
+                    firstStage, secondStage, alpha);
+                const real_t x = (1.0 - alpha)
+                    * knots[firstStage * worldDimension]
+                    + alpha * knots[secondStage * worldDimension];
+                const real_t y = (1.0 - alpha)
+                    * knots[firstStage * worldDimension + 1]
+                    + alpha * knots[secondStage * worldDimension + 1];
+                near = projectToPolygon(
+                    x, y, obstacles[obstacle]).signedDistance
+                    <= requiredDistance + activationDistance;
+            }
+            if (near)
+            {
+                ActiveObstacle selected;
+                selected.obstacle = obstacle;
+                selected.circle = circle;
+                selected.requiredDistance = requiredDistance;
+                active.push_back(selected);
+            }
         }
-        if (near) active.push_back(obstacle);
     }
     return active;
 }
@@ -626,7 +791,7 @@ void buildAgentQp(
     qp.trajectoryVariableCount = (qp.N + 1) * qp.nx + qp.N * qp.nu;
     const int_t dynamicsRows = qp.N * qp.nx;
     const int_t obstacleSamples = qp.N * samplesPerInterval;
-    const std::vector<std::size_t> activeObstacles = selectActiveObstacles(
+    const std::vector<ActiveObstacle> activeObstacles = selectActiveObstacles(
         p, nominalStates, obstacles, obstacleSafetyDistance,
         obstacleActivationDistance, samplesPerInterval);
     qp.activeObstacleCount = static_cast<int_t>(activeObstacles.size());
@@ -705,6 +870,19 @@ void buildAgentQp(
         }
     }
     for (int_t i = 0; i < qp.nx; ++i) qp.lb[i] = qp.ub[i] = p.initialState[i];
+
+    if (p.enforceTerminalState)
+    {
+        const int_t terminalDecision = stateIndex(qp, qp.N);
+        for (int_t i = 0; i < qp.nx; ++i)
+        {
+            if (!p.terminalStateConstraintMask.empty()
+                && !p.terminalStateConstraintMask[i])
+                continue;
+            qp.lb[terminalDecision + i] = qp.ub[terminalDecision + i]
+                = p.stateReference[qp.N * qp.nx + i];
+        }
+    }
 
 
     std::vector<real_t> terminalReference(terminalRows, 0.0);
@@ -787,12 +965,48 @@ void buildAgentQp(
             qp.lbA[row] = qp.ubA[row] = -ck[i];
         }
     }
-    const int_t nativeDimension = p.model->positionDimension();
+    for (int_t k = 0; k + 1 < qp.N; ++k)
+    {
+        const int_t firstControl = controlIndex(qp, k);
+        const int_t secondControl = controlIndex(qp, k + 1);
+        for (int_t i = 0; i < qp.nu; ++i)
+        {
+            const real_t weight = p.controlDifferenceWeights.empty()
+                ? 0.0 : p.controlDifferenceWeights[i];
+            qp.Hbase[(firstControl + i) * qp.nV + firstControl + i] += weight;
+            qp.Hbase[(secondControl + i) * qp.nV + secondControl + i] += weight;
+            qp.Hbase[(firstControl + i) * qp.nV + secondControl + i] -= weight;
+            qp.Hbase[(secondControl + i) * qp.nV + firstControl + i] -= weight;
+        }
+    }
+    const int_t circleCount = collisionCircleCount(p);
+    std::vector<CollisionLinearization> nominalCollisions(circleCount);
+    std::vector<CollisionLinearization> homotopyCollisions(circleCount);
+    std::vector<CollisionLinearization> referenceCollisions(circleCount);
+    if (!activeObstacles.empty())
+    {
+    for (int_t circle = 0; circle < circleCount; ++circle)
+    {
+        linearizeCollisionTrajectory(
+            p, circle, nominalStates, qp.np, nominalCollisions[circle]);
+        linearizeCollisionTrajectory(
+            p, circle, homotopyStates, qp.np, homotopyCollisions[circle]);
+        linearizeCollisionTrajectory(
+            p, circle, p.stateReference, qp.np, referenceCollisions[circle]);
+    }
+    }
     for (std::size_t activeObstacle = 0;
          activeObstacle < activeObstacles.size();
          ++activeObstacle)
     {
-        const std::size_t obstacleIndex = activeObstacles[activeObstacle];
+        const ActiveObstacle& active = activeObstacles[activeObstacle];
+        const std::size_t obstacleIndex = active.obstacle;
+        const CollisionLinearization& nominalCollision =
+            nominalCollisions[active.circle];
+        const CollisionLinearization& homotopyCollision =
+            homotopyCollisions[active.circle];
+        const CollisionLinearization& referenceCollision =
+            referenceCollisions[active.circle];
         bool homotopyIsObstacleFeasible = true;
         for (int_t witnessSample = 1;
              witnessSample <= obstacleSamples;
@@ -810,22 +1024,19 @@ void buildAgentQp(
             );
             const int_t stages[2] = {firstStage, secondStage};
             const real_t weights[2] = {1.0 - alpha, alpha};
-            std::vector<real_t> witnessPosition(nativeDimension, 0.0);
+            std::vector<real_t> witnessPosition(qp.np, 0.0);
             for (int_t endpoint = 0; endpoint < 2; ++endpoint)
             {
                 if (weights[endpoint] <= 0.0) continue;
-                std::vector<real_t> position(nativeDimension, 0.0);
-                p.model->position(
-                    &homotopyStates[stages[endpoint] * qp.nx],
-                    &position[0]
-                );
-                for (int_t i = 0; i < nativeDimension; ++i)
-                    witnessPosition[i] += weights[endpoint] * position[i];
+                for (int_t i = 0; i < qp.np; ++i)
+                    witnessPosition[i] += weights[endpoint]
+                        * homotopyCollision.positions[
+                            stages[endpoint] * qp.np + i];
             }
             if (projectToPolygon(
                     witnessPosition[0], witnessPosition[1],
                     obstacles[obstacleIndex]).signedDistance
-                < obstacleSafetyDistance - 1.0e-9)
+                < active.requiredDistance - 1.0e-9)
             {
                 homotopyIsObstacleFeasible = false;
                 break;
@@ -833,8 +1044,9 @@ void buildAgentQp(
         }
         const ObstacleBypass bypass = buildObstacleBypass(
             p,
+            active.circle,
             obstacles[obstacleIndex],
-            obstacleSafetyDistance
+            active.requiredDistance
         );
         for (int_t sample = 1; sample <= obstacleSamples; ++sample)
         {
@@ -850,25 +1062,19 @@ void buildAgentQp(
             );
             const int_t stages[2] = {firstStage, secondStage};
             const real_t weights[2] = {1.0 - alpha, alpha};
-            std::vector<real_t> nominalPosition(nativeDimension, 0.0);
-            std::vector<real_t> referencePosition(nativeDimension, 0.0);
+            std::vector<real_t> nominalPosition(qp.np, 0.0);
+            std::vector<real_t> referencePosition(qp.np, 0.0);
             for (int_t endpoint = 0; endpoint < 2; ++endpoint)
             {
                 if (weights[endpoint] <= 0.0) continue;
-                std::vector<real_t> nominalAtStage(nativeDimension, 0.0);
-                std::vector<real_t> referenceAtStage(nativeDimension, 0.0);
-                p.model->position(
-                    &nominalStates[stages[endpoint] * qp.nx],
-                    &nominalAtStage[0]
-                );
-                p.model->position(
-                    &p.stateReference[stages[endpoint] * qp.nx],
-                    &referenceAtStage[0]
-                );
-                for (int_t i = 0; i < nativeDimension; ++i)
+                for (int_t i = 0; i < qp.np; ++i)
                 {
-                    nominalPosition[i] += weights[endpoint] * nominalAtStage[i];
-                    referencePosition[i] += weights[endpoint] * referenceAtStage[i];
+                    nominalPosition[i] += weights[endpoint]
+                        * nominalCollision.positions[
+                            stages[endpoint] * qp.np + i];
+                    referencePosition[i] += weights[endpoint]
+                        * referenceCollision.positions[
+                            stages[endpoint] * qp.np + i];
                 }
             }
             const PolygonProjection projection = projectToPolygon(
@@ -889,7 +1095,7 @@ void buildAgentQp(
             const bool hasBypass = bypassHalfspaceAt(
                 bypass,
                 obstacles[obstacleIndex],
-                obstacleSafetyDistance,
+                active.requiredDistance,
                 referenceTravel,
                 bypassNormal,
                 bypassSupport
@@ -900,7 +1106,7 @@ void buildAgentQp(
             if (hasBypass
                 && (!homotopyIsObstacleFeasible
                     || nominalBypassValue
-                        >= bypassSupport + obstacleSafetyDistance - 1.0e-9))
+                        >= bypassSupport + active.requiredDistance - 1.0e-9))
             {
                 normal[0] = bypassNormal[0];
                 normal[1] = bypassNormal[1];
@@ -914,15 +1120,17 @@ void buildAgentQp(
                 if (weights[endpoint] <= 0.0) continue;
                 const int_t stage = stages[endpoint];
                 const int_t offset = stateIndex(qp, stage);
-                const real_t* C = &qp.positionC[stage * qp.np * qp.nx];
-                const real_t* d = &qp.positionD[stage * qp.np];
+                const real_t* C = &nominalCollision.C[
+                    stage * qp.np * qp.nx];
+                const real_t* d = &nominalCollision.D[
+                    stage * qp.np];
                 for (int_t j = 0; j < qp.nx; ++j)
                     qp.A[row * qp.nV + offset + j] += weights[endpoint]
                         * (normal[0] * C[j] + normal[1] * C[qp.nx + j]);
                 affine += weights[endpoint]
                     * (normal[0] * d[0] + normal[1] * d[1]);
             }
-            qp.lbA[row] = support + obstacleSafetyDistance - affine;
+            qp.lbA[row] = support + active.requiredDistance - affine;
             qp.ubA[row] = INFTY;
             if (elasticConstraints)
             {
@@ -945,11 +1153,14 @@ real_t maximumRestorationSlack(const AgentQp& qp)
 }
 
 void positionFromDecision(
-    const AgentQp& qp, int_t k, const std::vector<real_t>& z, real_t* position
+    const AgentQp& qp,
+    const std::vector<real_t>& CValues,
+    const std::vector<real_t>& DValues,
+    int_t k, const std::vector<real_t>& z, real_t* position
 )
 {
-    const real_t* C = &qp.positionC[k * qp.np * qp.nx];
-    const real_t* d = &qp.positionD[k * qp.np];
+    const real_t* C = &CValues[k * qp.np * qp.nx];
+    const real_t* d = &DValues[k * qp.np];
     const int_t offset = stateIndex(qp, k);
     for (int_t i = 0; i < qp.np; ++i)
     {
@@ -981,6 +1192,8 @@ void sampleStages(
 
 void positionFromDecisionSample(
     const AgentQp& qp,
+    const std::vector<real_t>& CValues,
+    const std::vector<real_t>& DValues,
     int_t sample,
     int_t samplesPerInterval,
     const std::vector<real_t>& decision,
@@ -997,8 +1210,10 @@ void positionFromDecisionSample(
         alpha
     );
     std::vector<real_t> first(qp.np, 0.0), second(qp.np, 0.0);
-    positionFromDecision(qp, firstStage, decision, &first[0]);
-    positionFromDecision(qp, secondStage, decision, &second[0]);
+    positionFromDecision(
+        qp, CValues, DValues, firstStage, decision, &first[0]);
+    positionFromDecision(
+        qp, CValues, DValues, secondStage, decision, &second[0]);
     for (int_t i = 0; i < qp.np; ++i)
         position[i] = (1.0 - alpha) * first[i] + alpha * second[i];
 }
@@ -1013,21 +1228,34 @@ std::vector<PairData> buildPairs(
 {
     std::vector<PairData> pairs;
     const int_t N = agents[0].horizon;
-    const int_t potentialPairs = static_cast<int_t>(
-        agents.size() * (agents.size() - 1) / 2);
+    int_t potentialPairs = 0;
+    for (std::size_t first = 0; first < agents.size(); ++first)
+        for (std::size_t second = first + 1; second < agents.size(); ++second)
+            potentialPairs += collisionCircleCount(agents[first])
+                * collisionCircleCount(agents[second]);
     stats.maximumPotentialPairs = std::max(stats.maximumPotentialPairs, potentialPairs);
     for (std::size_t first = 0; first < agents.size(); ++first)
     for (std::size_t second = first + 1; second < agents.size(); ++second)
     {
+      for (int_t firstCircle = 0; firstCircle < collisionCircleCount(agents[first]); ++firstCircle)
+      for (int_t secondCircle = 0; secondCircle < collisionCircleCount(agents[second]); ++secondCircle)
+      {
         PairData pair; pair.first = static_cast<int_t>(first); pair.second = static_cast<int_t>(second);
+        pair.firstCircle = firstCircle; pair.secondCircle = secondCircle;
         pair.samplesPerInterval = options.collisionSamplesPerInterval;
-        pair.safetyDistance = pairSafetyDistance(agents[first], agents[second], options);
+        const CollisionCircle firstGeometry = collisionCircleForAgent(
+            agents[first], firstCircle, options);
+        const CollisionCircle secondGeometry = collisionCircleForAgent(
+            agents[second], secondCircle, options);
+        pair.safetyDistance = firstGeometry.radius + secondGeometry.radius;
         const PairData* previous = 0;
         if (previousPairs != 0)
             for (std::size_t oldPair = 0; oldPair < previousPairs->size(); ++oldPair)
             {
                 const PairData& candidate = (*previousPairs)[oldPair];
-                if (candidate.first == pair.first && candidate.second == pair.second)
+                if (candidate.first == pair.first && candidate.second == pair.second
+                    && candidate.firstCircle == pair.firstCircle
+                    && candidate.secondCircle == pair.secondCircle)
                 {
                     previous = &candidate;
                     break;
@@ -1040,25 +1268,17 @@ std::vector<PairData> buildPairs(
         pair.firstAuxiliary.assign(count, 0.0); pair.secondAuxiliary.assign(count, 0.0);
         pair.firstDual.assign(count, 0.0); pair.secondDual.assign(count, 0.0);
         pair.previousFirstAuxiliary.assign(count, 0.0); pair.previousSecondAuxiliary.assign(count, 0.0);
-        std::vector<real_t> firstKnots((N + 1) * np, 0.0);
-        std::vector<real_t> secondKnots((N + 1) * np, 0.0);
-        const int_t nxf = agents[first].model->stateDimension();
-        const int_t nxs = agents[second].model->stateDimension();
-        for (int_t k = 0; k <= N; ++k)
-        {
-            worldPosition(
-                *agents[first].model,
-                &states[first][k * nxf],
-                np,
-                &firstKnots[k * np]
-            );
-            worldPosition(
-                *agents[second].model,
-                &states[second][k * nxs],
-                np,
-                &secondKnots[k * np]
-            );
-        }
+        CollisionLinearization firstLinearization, secondLinearization;
+        linearizeCollisionTrajectory(
+            agents[first], firstCircle, states[first], np, firstLinearization);
+        linearizeCollisionTrajectory(
+            agents[second], secondCircle, states[second], np, secondLinearization);
+        const std::vector<real_t>& firstKnots = firstLinearization.positions;
+        const std::vector<real_t>& secondKnots = secondLinearization.positions;
+        pair.firstC.swap(firstLinearization.C);
+        pair.firstD.swap(firstLinearization.D);
+        pair.secondC.swap(secondLinearization.C);
+        pair.secondD.swap(secondLinearization.D);
         bool active = options.pairActivationDistance < 0.0;
         if (!active)
         {
@@ -1178,6 +1398,7 @@ std::vector<PairData> buildPairs(
             if (previous != 0 && !transported) ++stats.resetPairStages;
         }
         pairs.push_back(pair);
+      }
     }
     stats.maximumActivePairs = std::max(
         stats.maximumActivePairs, static_cast<int_t>(pairs.size()));
@@ -1204,6 +1425,10 @@ void addAdmmTerms(int_t agentIndex, const std::vector<PairData>& pairs,
         if (!isFirst && pair.second != agentIndex) continue;
         const std::vector<real_t>& v = isFirst ? pair.firstAuxiliary : pair.secondAuxiliary;
         const std::vector<real_t>& dual = isFirst ? pair.firstDual : pair.secondDual;
+        const std::vector<real_t>& collisionC =
+            isFirst ? pair.firstC : pair.secondC;
+        const std::vector<real_t>& collisionD =
+            isFirst ? pair.firstD : pair.secondD;
         const int_t sampleCount = static_cast<int_t>(v.size()) / qp.np;
         for (int_t sample = 0; sample < sampleCount; ++sample)
         {
@@ -1223,7 +1448,7 @@ void addAdmmTerms(int_t agentIndex, const std::vector<PairData>& pairs,
             for (int_t endpoint = 0; endpoint < 2; ++endpoint)
             {
                 if (weights[endpoint] <= 0.0) continue;
-                const real_t* d = &qp.positionD[stages[endpoint] * qp.np];
+                const real_t* d = &collisionD[stages[endpoint] * qp.np];
                 for (int_t coordinate = 0; coordinate < qp.np; ++coordinate)
                     affine[coordinate] += weights[endpoint] * d[coordinate];
             }
@@ -1231,7 +1456,7 @@ void addAdmmTerms(int_t agentIndex, const std::vector<PairData>& pairs,
             {
                 if (weights[endpoint] <= 0.0) continue;
                 const int_t offset = stateIndex(qp, stages[endpoint]);
-                const real_t* C = &qp.positionC[
+                const real_t* C = &collisionC[
                     stages[endpoint] * qp.np * qp.nx
                 ];
                 for (int_t i = 0; i < qp.nx; ++i)
@@ -1248,7 +1473,7 @@ void addAdmmTerms(int_t agentIndex, const std::vector<PairData>& pairs,
                     {
                         if (weights[otherEndpoint] <= 0.0) continue;
                         const int_t otherOffset = stateIndex(qp, stages[otherEndpoint]);
-                        const real_t* otherC = &qp.positionC[
+                        const real_t* otherC = &collisionC[
                             stages[otherEndpoint] * qp.np * qp.nx
                         ];
                         for (int_t j = 0; j < qp.nx; ++j)
@@ -1514,11 +1739,13 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
             for (int_t sample = 0; sample < sampleCount; ++sample)
             {
                 positionFromDecisionSample(
-                    qps[pairs[p].first], sample, pairs[p].samplesPerInterval,
+                    qps[pairs[p].first], pairs[p].firstC, pairs[p].firstD,
+                    sample, pairs[p].samplesPerInterval,
                     qps[pairs[p].first].solution, &pairs[p].firstPosition[sample * np]
                 );
                 positionFromDecisionSample(
-                    qps[pairs[p].second], sample, pairs[p].samplesPerInterval,
+                    qps[pairs[p].second], pairs[p].secondC, pairs[p].secondD,
+                    sample, pairs[p].samplesPerInterval,
                     qps[pairs[p].second].solution, &pairs[p].secondPosition[sample * np]
                 );
             }
@@ -1892,10 +2119,14 @@ bool solveCentralized(const std::vector<PairData>& pairs, int_t outer,
             {
                 if (weights[endpoint] <= 0.0) continue;
                 const int_t stage = stages[endpoint];
-                const real_t* firstC = &first.positionC[stage * first.np * first.nx];
-                const real_t* secondC = &second.positionC[stage * second.np * second.nx];
-                const real_t* firstD = &first.positionD[stage * first.np];
-                const real_t* secondD = &second.positionD[stage * second.np];
+                const real_t* firstC =
+                    &pair.firstC[stage * first.np * first.nx];
+                const real_t* secondC =
+                    &pair.secondC[stage * second.np * second.nx];
+                const real_t* firstD =
+                    &pair.firstD[stage * first.np];
+                const real_t* secondD =
+                    &pair.secondD[stage * second.np];
                 const int_t firstState = offsets[pair.first] + stateIndex(first, stage);
                 const int_t secondState = offsets[pair.second] + stateIndex(second, stage);
                 for (int_t j = 0; j < first.nx; ++j)
@@ -1993,6 +2224,15 @@ real_t trajectoryCost(const std::vector<NonlinearAgentProblem>& agents,
                 cost += 0.5 * agents[a].controlWeights[i] * error * error;
             }
         }
+        for (int_t k = 0; k + 1 < agents[a].horizon; ++k)
+            for (int_t i = 0; i < nu; ++i)
+            {
+                const real_t weight = agents[a].controlDifferenceWeights.empty()
+                    ? 0.0 : agents[a].controlDifferenceWeights[i];
+                const real_t difference = controls[a][(k + 1) * nu + i]
+                    - controls[a][k * nu + i];
+                cost += 0.5 * weight * difference * difference;
+            }
     }
     return cost;
 }
@@ -2031,19 +2271,22 @@ real_t minimumDistance(const std::vector<NonlinearAgentProblem>& agents,
     return minimum;
 }
 
-void interpolatedPosition(
-    const NonlinearModel& model,
+void interpolatedCollisionPosition(
+    const NonlinearAgentProblem& agent,
+    int_t circle,
     const std::vector<real_t>& states,
     int_t stage,
     real_t alpha,
     int_t dimension,
     std::vector<real_t>& position)
 {
-    const int_t nx = model.stateDimension();
+    const int_t nx = agent.model->stateDimension();
     std::vector<real_t> first(dimension, 0.0);
     std::vector<real_t> second(dimension, 0.0);
-    worldPosition(model, &states[stage * nx], dimension, &first[0]);
-    worldPosition(model, &states[(stage + 1) * nx], dimension, &second[0]);
+    worldCollisionPosition(
+        agent, circle, &states[stage * nx], dimension, &first[0]);
+    worldCollisionPosition(
+        agent, circle, &states[(stage + 1) * nx], dimension, &second[0]);
     position.resize(dimension);
     for (int_t i = 0; i < dimension; ++i)
         position[i] = first[i] + alpha * (second[i] - first[i]);
@@ -2060,12 +2303,22 @@ real_t minimumPairwiseClearance(
     const int_t np = worldPositionDimension(agents);
     for (std::size_t first = 0; first < agents.size(); ++first)
     for (std::size_t second = first + 1; second < agents.size(); ++second)
+    for (int_t firstCircle = 0;
+         firstCircle < collisionCircleCount(agents[first]);
+         ++firstCircle)
+    for (int_t secondCircle = 0;
+         secondCircle < collisionCircleCount(agents[second]);
+         ++secondCircle)
     {
-        const real_t requiredDistance = pairSafetyDistance(
-            agents[first],
-            agents[second],
-            options
-        );
+        const CollisionCircle firstGeometry = collisionCircleForAgent(
+            agents[first], firstCircle, options);
+        const CollisionCircle secondGeometry = collisionCircleForAgent(
+            agents[second], secondCircle, options);
+        const real_t requiredDistance =
+            agents[first].collisionCircles.empty()
+            && agents[second].collisionCircles.empty()
+            ? pairSafetyDistance(agents[first], agents[second], options)
+            : firstGeometry.radius + secondGeometry.radius;
         std::vector<real_t> pf(np, 0.0), ps(np, 0.0);
         for (int_t k = 0; k < agents[first].horizon; ++k)
         for (int_t sample = 0;
@@ -2074,16 +2327,18 @@ real_t minimumPairwiseClearance(
         {
             const real_t alpha = static_cast<real_t>(sample)
                 / options.collisionSamplesPerInterval;
-            interpolatedPosition(
-                *agents[first].model,
+            interpolatedCollisionPosition(
+                agents[first],
+                firstCircle,
                 states[first],
                 k,
                 alpha,
                 np,
                 pf
             );
-            interpolatedPosition(
-                *agents[second].model,
+            interpolatedCollisionPosition(
+                agents[second],
+                secondCircle,
                 states[second],
                 k,
                 alpha,
@@ -2148,37 +2403,36 @@ real_t minimumObstacleClearance(
     for (std::size_t a = 0; a < agents.size(); ++a)
     {
         const int_t np = agents[a].model->positionDimension();
-        const real_t requiredDistance = obstacleDistanceForAgent(
-            agents[a],
-            options
-        );
-        std::vector<real_t> position(np, 0.0);
-        for (int_t k = 0; k < agents[a].horizon; ++k)
-        for (int_t sample = 0;
-             sample <= options.collisionSamplesPerInterval;
-             ++sample)
+        for (int_t circle = 0;
+             circle < collisionCircleCount(agents[a]);
+             ++circle)
         {
-            const real_t alpha = static_cast<real_t>(sample)
-                / options.collisionSamplesPerInterval;
-            interpolatedPosition(
-                *agents[a].model,
-                states[a],
-                k,
-                alpha,
-                np,
-                position
-            );
-            for (std::size_t obstacleIndex = 0;
-                 obstacleIndex < obstacles.size();
-                 ++obstacleIndex)
-                minimum = std::min(
-                    minimum,
-                    projectToPolygon(
-                        position[0],
-                        position[1],
-                        obstacles[obstacleIndex]
-                    ).signedDistance - requiredDistance
+            const CollisionCircle geometry = collisionCircleForAgent(
+                agents[a], circle, options);
+            const real_t requiredDistance = obstacleDistanceForCircle(
+                agents[a], geometry, options);
+            std::vector<real_t> position(np, 0.0);
+            for (int_t k = 0; k < agents[a].horizon; ++k)
+            for (int_t sample = 0;
+                 sample <= options.collisionSamplesPerInterval;
+                 ++sample)
+            {
+                const real_t alpha = static_cast<real_t>(sample)
+                    / options.collisionSamplesPerInterval;
+                interpolatedCollisionPosition(
+                    agents[a], circle, states[a], k, alpha, np, position);
+                for (std::size_t obstacleIndex = 0;
+                     obstacleIndex < obstacles.size();
+                     ++obstacleIndex)
+                    minimum = std::min(
+                        minimum,
+                        projectToPolygon(
+                            position[0],
+                            position[1],
+                            obstacles[obstacleIndex]
+                        ).signedDistance - requiredDistance
                 );
+            }
         }
     }
     return minimum;
@@ -2202,37 +2456,49 @@ bool validateEndpointGeometry(
                 ? &agent.initialState[0]
                 : &agent.stateReference[agent.horizon * nx];
             const int_t np = agent.model->positionDimension();
-            std::vector<real_t> position(np, 0.0);
-            agent.model->position(state, &position[0]);
-            const real_t requiredDistance = obstacleDistanceForAgent(
-                agent,
-                options
-            );
-            for (std::size_t obstacle = 0;
-                 obstacle < obstacles.size();
-                 ++obstacle)
+            for (int_t circle = 0;
+                 circle < collisionCircleCount(agent);
+                 ++circle)
             {
-                const real_t margin = projectToPolygon(
-                    position[0],
-                    position[1],
-                    obstacles[obstacle]
-                ).signedDistance - requiredDistance;
-                if (margin < -options.collisionTolerance)
+                const CollisionCircle geometry = collisionCircleForAgent(
+                    agent, circle, options);
+                const real_t requiredDistance = obstacleDistanceForCircle(
+                    agent, geometry, options);
+                std::vector<real_t> position(np, 0.0);
+                worldCollisionPosition(
+                    agent, circle, state, np, &position[0]);
+                for (std::size_t obstacle = 0;
+                     obstacle < obstacles.size();
+                     ++obstacle)
                 {
-                    std::ostringstream message;
-                    message << "agent " << a << " "
-                        << (endpoint == 0 ? "initial state" : "goal reference")
-                        << " violates obstacle " << obstacle
-                        << " clearance at stage "
-                        << (endpoint == 0 ? 0 : agent.horizon);
-                    error = message.str();
-                    return false;
+                    const real_t margin = projectToPolygon(
+                        position[0],
+                        position[1],
+                        obstacles[obstacle]
+                    ).signedDistance - requiredDistance;
+                    if (margin < -options.collisionTolerance)
+                    {
+                        std::ostringstream message;
+                        message << "agent " << a << " "
+                            << (endpoint == 0 ? "initial state" : "goal reference")
+                            << " violates obstacle " << obstacle
+                            << " clearance at stage "
+                            << (endpoint == 0 ? 0 : agent.horizon);
+                        error = message.str();
+                        return false;
+                    }
                 }
             }
         }
 
         for (std::size_t first = 0; first < agents.size(); ++first)
         for (std::size_t second = first + 1; second < agents.size(); ++second)
+        for (int_t firstCircle = 0;
+             firstCircle < collisionCircleCount(agents[first]);
+             ++firstCircle)
+        for (int_t secondCircle = 0;
+             secondCircle < collisionCircleCount(agents[second]);
+             ++secondCircle)
         {
             const NonlinearAgentProblem& firstAgent = agents[first];
             const NonlinearAgentProblem& secondAgent = agents[second];
@@ -2246,25 +2512,28 @@ bool validateEndpointGeometry(
                 : &secondAgent.stateReference[secondAgent.horizon * secondNx];
             std::vector<real_t> firstPosition(worldDimension, 0.0);
             std::vector<real_t> secondPosition(worldDimension, 0.0);
-            worldPosition(
-                *firstAgent.model,
-                firstState,
-                worldDimension,
-                &firstPosition[0]
-            );
-            worldPosition(
-                *secondAgent.model,
-                secondState,
-                worldDimension,
-                &secondPosition[0]
-            );
+            worldCollisionPosition(
+                firstAgent, firstCircle, firstState,
+                worldDimension, &firstPosition[0]);
+            worldCollisionPosition(
+                secondAgent, secondCircle, secondState,
+                worldDimension, &secondPosition[0]);
             real_t squaredDistance = 0.0;
             for (int_t i = 0; i < worldDimension; ++i)
                 squaredDistance +=
                     (firstPosition[i] - secondPosition[i])
                     * (firstPosition[i] - secondPosition[i]);
+            const CollisionCircle firstGeometry = collisionCircleForAgent(
+                firstAgent, firstCircle, options);
+            const CollisionCircle secondGeometry = collisionCircleForAgent(
+                secondAgent, secondCircle, options);
+            const real_t requiredDistance =
+                firstAgent.collisionCircles.empty()
+                && secondAgent.collisionCircles.empty()
+                ? pairSafetyDistance(firstAgent, secondAgent, options)
+                : firstGeometry.radius + secondGeometry.radius;
             const real_t margin = std::sqrt(squaredDistance)
-                - pairSafetyDistance(firstAgent, secondAgent, options);
+                - requiredDistance;
             if (margin < -options.collisionTolerance)
             {
                 std::ostringstream message;
@@ -2287,6 +2556,24 @@ std::string geometryDiagnostic(
     const NonlinearTurboOptions& options
 )
 {
+    bool hasBodyFootprint = false;
+    for (std::size_t agent = 0; agent < agents.size(); ++agent)
+        hasBodyFootprint = hasBodyFootprint
+            || !agents[agent].collisionCircles.empty();
+    if (hasBodyFootprint)
+    {
+        const real_t pairMargin =
+            minimumPairwiseClearance(agents, states, options);
+        const real_t obstacleMargin =
+            minimumObstacleClearance(agents, states, obstacles, options);
+        if (std::min(pairMargin, obstacleMargin)
+            >= -options.collisionTolerance)
+            return "nominal geometry is feasible; inspect dynamics and bounds";
+        if (pairMargin <= obstacleMargin)
+            return "nominal body footprints violate pairwise clearance";
+        return "nominal body footprint violates obstacle clearance";
+    }
+
     real_t worstMargin = INFTY;
     bool worstIsPair = false;
     std::size_t worstFirst = 0, worstSecond = 0;
@@ -2469,9 +2756,19 @@ real_t dynamicsDefect(const std::vector<NonlinearAgentProblem>& agents,
 
 } // anonymous namespace
 
+CollisionCircle::CollisionCircle()
+    : longitudinalOffset(0.0), lateralOffset(0.0), radius(0.0) {}
+
+CollisionCircle::CollisionCircle(
+    real_t longitudinal,
+    real_t lateral,
+    real_t radiusValue)
+    : longitudinalOffset(longitudinal), lateralOffset(lateral), radius(radiusValue) {}
+
 NonlinearAgentProblem::NonlinearAgentProblem()
     : model(0), horizon(0), collisionRadius(-1.0),
-      obstacleSafetyDistance(-1.0), terminalPositionTolerance(-1.0) {}
+      obstacleSafetyDistance(-1.0), terminalPositionTolerance(-1.0),
+      enforceTerminalState(false) {}
 
 NonlinearTurboOptions::NonlinearTurboOptions()
     : coordinationMethod(NCM_DISTRIBUTED_ADMM), continuationMode(NCONT_FULL),
@@ -2705,9 +3002,15 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                     positionDimension,
                     qps[a]
                 );
+            int_t potentialObstacles = 0;
+            for (std::size_t a = 0; a < agents.size(); ++a)
+                potentialObstacles = std::max(
+                    potentialObstacles,
+                    static_cast<int_t>(obstacles.size())
+                        * collisionCircleCount(agents[a]));
             result.statistics.maximumPotentialObstaclesPerAgent = std::max(
                 result.statistics.maximumPotentialObstaclesPerAgent,
-                static_cast<int_t>(obstacles.size()));
+                potentialObstacles);
             for (std::size_t a = 0; a < qps.size(); ++a)
                 result.statistics.maximumActiveObstaclesPerAgent = std::max(
                     result.statistics.maximumActiveObstaclesPerAgent,

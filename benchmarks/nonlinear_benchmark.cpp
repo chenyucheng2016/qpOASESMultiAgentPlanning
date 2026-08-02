@@ -64,9 +64,11 @@ struct Arguments
     bool exactAdmm;
     bool dryRun;
     bool requireSuccess;
+    bool requireConvergence;
     Arguments() : suite("smoke"), output("nonlinear_benchmark.csv"), method("all"),
         track("all"), caseId("all"), scenarioIndex(-1), threads(0),
-        fixedRho(false), exactAdmm(false), dryRun(false), requireSuccess(false) {}
+        fixedRho(false), exactAdmm(false), dryRun(false), requireSuccess(false),
+        requireConvergence(false) {}
 };
 
 std::string csvText(const std::string& text)
@@ -94,6 +96,11 @@ bool parseArguments(int argc, char** argv, Arguments& arguments)
         if (option == "--require-success")
         {
             arguments.requireSuccess = true;
+            continue;
+        }
+        if (option == "--require-convergence")
+        {
+            arguments.requireConvergence = true;
             continue;
         }
         if (option == "--fixed-rho")
@@ -719,7 +726,6 @@ NonlinearTurboOptions solverOptions(
     options.maxWorkingSetRecalculations = 400;
     options.rho = 35.0;
     options.adaptiveRho = adaptiveRho;
-    options.adaptiveRhoMinimumAgents = 8;
     options.adaptiveRhoInterval = 5;
     options.adaptiveRhoImbalance = 10.0;
     options.adaptiveRhoScale = 2.0;
@@ -727,6 +733,7 @@ NonlinearTurboOptions solverOptions(
     options.maximumRho = 140.0;
     options.inexactAdmmScpIterations = inexactAdmm ? 2 : 0;
     options.inexactAdmmToleranceMultiplier = inexactAdmm ? 5.0 : 1.0;
+    options.polishingAdmmIterations = 200;
     options.controlTrustRegion = 1.0;
     options.admmPrimalTolerance = 1.0e-3;
     options.admmDualTolerance = 1.0e-2;
@@ -744,10 +751,14 @@ void writeHeader(std::ofstream& output)
         "solve_time_ms,max_local_qp_time_ms,objective,minimum_pairwise_clearance,"
         "minimum_obstacle_clearance,maximum_dynamics_defect,maximum_terminal_error,"
         "scp_iterations,admm_iterations,qp_solves,qp_working_set_recalculations,backend_iterations,"
-        "primal_residual,dual_residual,collision_samples_per_interval,max_scp_iterations,"
-        "max_admm_iterations,merit_penalty,rho,adaptive_rho,adaptive_rho_active,"
-        "adaptive_rho_minimum_agents,rho_updates,"
-        "minimum_admm_rho,maximum_admm_rho,final_admm_rho,"
+        "last_qp_status,failed_agent,primal_residual,dual_residual,"
+        "collision_samples_per_interval,max_scp_iterations,max_admm_iterations,"
+        "polishing_admm_iterations,merit_penalty,rho,adaptive_rho,adaptive_rho_active,"
+        "rho_updates,minimum_admm_rho,maximum_admm_rho,final_admm_rho,"
+        "restoration_attempts,successful_restorations,polishing_scp_iterations,"
+        "maximum_restoration_slack,final_restoration_slack,max_restoration_attempts,"
+        "restoration_trust_region_shrink,minimum_control_trust_region,"
+        "restoration_slack_penalty,restoration_slack_tolerance,"
         "inexact_admm_scp_iterations,inexact_admm_tolerance_multiplier,"
         "cold_starts,matrix_hotstarts,vector_hotstarts,transported_pair_stages,"
         "reset_pair_stages,parallel_qp_batches,parallel_agent_threads,admm_relative_tolerance,admm_relaxation,"
@@ -762,6 +773,17 @@ void writeHeader(std::ofstream& output)
         "globalization_time_ms\n";
 }
 
+void writeScpHeader(std::ofstream& output)
+{
+    output << "case_id,method,iteration,qp_solved,qp_status,failed_agent,"
+        "restoration_attempts,maximum_restoration_slack,"
+        "admm_converged,restoration_used,polishing,step_accepted,"
+        "admm_iterations,rho_updates,"
+        "objective,merit,primal_residual,dual_residual,rho,"
+        "control_trust_region,step_length,maximum_control_step,minimum_pairwise_clearance,"
+        "minimum_obstacle_clearance,maximum_terminal_error\n";
+}
+
 bool runCase(
     const std::string& suite,
     const BenchmarkScenario& scenario,
@@ -769,7 +791,9 @@ bool runCase(
     int threads,
     bool adaptiveRho,
     bool inexactAdmm,
-    std::ofstream& output)
+    bool requireConvergence,
+    std::ofstream& output,
+    std::ofstream& traceOutput)
 {
     NonlinearTurboOptions options = solverOptions(
         method, threads, adaptiveRho, inexactAdmm);
@@ -781,6 +805,24 @@ bool runCase(
     const NonlinearTurboResult result = NonlinearTurboADMM().solve(
         scenario.agents, scenario.obstacles, options
     );
+    for (std::size_t iteration = 0; iteration < result.scpTrace.size(); ++iteration)
+    {
+        const NonlinearScpIterationStatistics& trace = result.scpTrace[iteration];
+        traceOutput << scenario.caseId << ',' << method.name << ','
+            << trace.iteration << ',' << (trace.qpSolved ? 1 : 0) << ','
+            << trace.qpStatus << ',' << trace.failedAgent << ','
+            << trace.restorationAttempts << ',' << trace.maximumRestorationSlack << ','
+            << (trace.admmConverged ? 1 : 0) << ','
+            << (trace.restorationUsed ? 1 : 0) << ','
+            << (trace.polishing ? 1 : 0) << ','
+            << (trace.stepAccepted ? 1 : 0) << ',' << trace.admmIterations << ','
+            << trace.rhoUpdates << ',' << std::setprecision(12) << trace.objective << ','
+            << trace.merit << ',' << trace.primalResidual << ',' << trace.dualResidual << ','
+            << trace.rho << ',' << trace.controlTrustRegion << ',' << trace.stepLength << ','
+            << trace.maximumControlStep << ',' << trace.minimumPairwiseClearance << ','
+            << trace.minimumObstacleClearance << ',' << trace.maximumTerminalPositionError << '\n';
+    }
+    traceOutput.flush();
     NonlinearValidationOptions validationOptions;
     validationOptions.interpolationSubsteps = 20;
     validationOptions.terminalPositionTolerance = 2.5;
@@ -812,17 +854,27 @@ bool runCase(
         << result.statistics.qpSolves << ','
         << result.statistics.qpWorkingSetRecalculations << ','
         << result.statistics.backendIterations << ','
+        << result.statistics.lastQpStatus << ',' << result.statistics.failedAgent << ','
         << result.statistics.primalResidual << ',' << result.statistics.dualResidual << ','
         << options.collisionSamplesPerInterval << ',' << options.maxScpIterations << ','
-        << options.maxAdmmIterations << ',' << options.meritPenalty << ','
+        << options.maxAdmmIterations << ',' << options.polishingAdmmIterations << ','
+        << options.meritPenalty << ','
         << options.rho << ',' << (options.adaptiveRho ? 1 : 0) << ','
-        << (options.adaptiveRho
-            && static_cast<int_t>(scenario.agents.size()) >= options.adaptiveRhoMinimumAgents ? 1 : 0) << ','
-        << options.adaptiveRhoMinimumAgents << ','
+        << (options.adaptiveRho ? 1 : 0) << ','
         << result.statistics.rhoUpdates << ','
         << result.statistics.minimumAdmmRho << ','
         << result.statistics.maximumAdmmRho << ','
         << result.statistics.finalAdmmRho << ','
+        << result.statistics.restorationAttempts << ','
+        << result.statistics.successfulRestorations << ','
+        << result.statistics.polishingScpIterations << ','
+        << result.statistics.maximumRestorationSlack << ','
+        << result.statistics.finalRestorationSlack << ','
+        << options.maxRestorationAttempts << ','
+        << options.restorationTrustRegionShrink << ','
+        << options.minimumControlTrustRegion << ','
+        << options.restorationSlackPenalty << ','
+        << options.restorationSlackTolerance << ','
         << options.inexactAdmmScpIterations << ','
         << options.inexactAdmmToleranceMultiplier << ','
         << result.statistics.coldStarts << ',' << result.statistics.matrixHotstarts << ','
@@ -863,7 +915,8 @@ bool runCase(
         scenario.obstacleCount, scenario.seed, method.name.c_str(),
         result.success ? 1 : 0, validation.success ? 1 : 0,
         result.statistics.solveTimeMilliseconds);
-    return result.success && validation.success;
+    return result.success && validation.success
+        && (!requireConvergence || result.converged);
 }
 
 }
@@ -878,7 +931,7 @@ int main(int argc, char** argv)
             "[--scenario-index nonnegative_integer] [--track all|scaling|models|families] [--output file.csv] "
             "[--method all|cold|inner|qp_continuation|full|centralized_qpoases|centralized_osqp] "
             "[--threads positive_integer] [--fixed-rho] [--exact-admm] "
-            "[--dry-run] [--require-success]\n",
+            "[--dry-run] [--require-success] [--require-convergence]\n",
             argv[0]);
         return 2;
     }
@@ -889,12 +942,15 @@ int main(int argc, char** argv)
         return 2;
     }
     std::ofstream output(arguments.output.c_str());
-    if (!output)
+    const std::string tracePath = arguments.output + ".scp.csv";
+    std::ofstream traceOutput(tracePath.c_str());
+    if (!output || !traceOutput)
     {
         std::fprintf(stderr, "cannot open benchmark output: %s\n", arguments.output.c_str());
         return 2;
     }
     writeHeader(output);
+    writeScpHeader(traceOutput);
     const std::vector<int> ns = agentCounts(arguments.suite);
     const std::vector<int> ms = obstacleCounts(arguments.suite);
     const std::vector<int> suiteSeeds = seeds(arguments.suite);
@@ -926,7 +982,8 @@ int main(int argc, char** argv)
             for (std::size_t method = 0; method < selectedMethods.size(); ++method)
                 allSuccessful = runCase(
                     arguments.suite, scenario, selectedMethods[method], arguments.threads,
-                    !arguments.fixedRho, !arguments.exactAdmm, output
+                    !arguments.fixedRho, !arguments.exactAdmm,
+                    arguments.requireConvergence, output, traceOutput
                 ) && allSuccessful;
         }
         if (generated == 0)
@@ -974,7 +1031,8 @@ int main(int argc, char** argv)
                 for (std::size_t method = 0; method < selectedMethods.size(); ++method)
                     allSuccessful = runCase(
                         arguments.suite, scenario, selectedMethods[method], arguments.threads,
-                        !arguments.fixedRho, !arguments.exactAdmm, output
+                        !arguments.fixedRho, !arguments.exactAdmm,
+                        arguments.requireConvergence, output, traceOutput
                     ) && allSuccessful;
             }
         }

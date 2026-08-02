@@ -72,7 +72,6 @@ struct NonlinearTurboOptions
     int_t maxLineSearchSteps;
     real_t rho;
     bool adaptiveRho;
-    int_t adaptiveRhoMinimumAgents;
     int_t adaptiveRhoInterval;
     real_t adaptiveRhoImbalance;
     real_t adaptiveRhoScale;
@@ -80,9 +79,15 @@ struct NonlinearTurboOptions
     real_t maximumRho;
     int_t inexactAdmmScpIterations;
     real_t inexactAdmmToleranceMultiplier;
+    int_t polishingAdmmIterations;
     real_t safetyDistance;
     real_t obstacleSafetyDistance;
     real_t controlTrustRegion;
+    int_t maxRestorationAttempts;
+    real_t restorationTrustRegionShrink;
+    real_t minimumControlTrustRegion;
+    real_t restorationSlackPenalty;
+    real_t restorationSlackTolerance;
     real_t admmPrimalTolerance;
     real_t admmDualTolerance;
     real_t admmRelativeTolerance;
@@ -113,6 +118,8 @@ struct NonlinearTurboStatistics
     int_t qpSolves;
     int_t qpWorkingSetRecalculations;
     int_t backendIterations;
+    int_t lastQpStatus;
+    int_t failedAgent;
     int_t coldStarts;
     int_t matrixHotstarts;
     int_t vectorHotstarts;
@@ -121,6 +128,9 @@ struct NonlinearTurboStatistics
     int_t parallelQpBatches;
     int_t parallelAgentThreads;
     int_t rhoUpdates;
+    int_t restorationAttempts;
+    int_t successfulRestorations;
+    int_t polishingScpIterations;
     int_t admmConvergedSubproblems;
     int_t admmIterationLimitSubproblems;
     int_t maximumActivePairs;
@@ -139,6 +149,8 @@ struct NonlinearTurboStatistics
     real_t minimumAdmmRho;
     real_t maximumAdmmRho;
     real_t finalAdmmRho;
+    real_t maximumRestorationSlack;
+    real_t finalRestorationSlack;
     real_t minimumDistance;
     real_t primalStoppingThreshold;
     real_t dualStoppingThreshold;
@@ -160,12 +172,42 @@ struct NonlinearTurboStatistics
     NonlinearTurboStatistics();
 };
 
+/** One row of the nonlinear SCP convergence trace. */
+struct NonlinearScpIterationStatistics
+{
+    int_t iteration;
+    int_t admmIterations;
+    int_t rhoUpdates;
+    int_t restorationAttempts;
+    int_t qpStatus;
+    int_t failedAgent;
+    bool qpSolved;
+    bool admmConverged;
+    bool restorationUsed;
+    bool polishing;
+    bool stepAccepted;
+    real_t objective;
+    real_t merit;
+    real_t primalResidual;
+    real_t dualResidual;
+    real_t rho;
+    real_t controlTrustRegion;
+    real_t maximumRestorationSlack;
+    real_t stepLength;
+    real_t maximumControlStep;
+    real_t minimumPairwiseClearance;
+    real_t minimumObstacleClearance;
+    real_t maximumTerminalPositionError;
+    NonlinearScpIterationStatistics();
+};
+
 struct NonlinearTurboResult
 {
     bool success;
     bool converged;
     std::string status;
     std::vector<NonlinearTrajectory> trajectories;
+    std::vector<NonlinearScpIterationStatistics> scpTrace;
     NonlinearTurboStatistics statistics;
     NonlinearTurboResult();
 };

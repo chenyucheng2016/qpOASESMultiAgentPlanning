@@ -80,22 +80,29 @@ and an independent post-solve validator confirms:
 Solver-reported success alone is not sufficient. Pairwise and obstacle safety
 are checked at trajectory knots and on interpolated substeps.
 
-Experiment revision 3 uses 20 collision samples per interval, 30 SCP
-iterations, at most 50 ADMM iterations per SCP subproblem, canonical penalty
-`rho=35`, absolute primal and dual tolerances of `1e-3` and `1e-2`, relative
-tolerance `1e-3`, over-relaxation `1.6`, merit penalty `1e7`, validator
+Experiment revision 4 uses 20 collision samples per interval, 30 SCP
+iterations, at most 50 ADMM iterations per ordinary SCP subproblem, canonical
+penalty `rho=35`, absolute primal and dual tolerances of `1e-3` and `1e-2`,
+relative tolerance `1e-3`, over-relaxation `1.6`, merit penalty `1e7`, validator
 interpolation count 20, and terminal position tolerance 2.5. The first two SCP
-iterations use ADMM tolerance multipliers 5 and 3; every later iteration uses
-the canonical tolerances. Residual-balanced penalty adaptation is activated
-only for `n >= 8`, is checked every five ADMM rounds, uses residual imbalance
-10 and scale factor 2, and keeps `rho` in `[5,140]`. Scaled duals are rescaled
-whenever `rho` changes, and the local Hessians use matrix hotstarts.
+iterations use ADMM tolerance multipliers 5 and 3. Residual-balanced penalty
+adaptation is active at every agent count, is checked every five rounds, uses
+imbalance 10 and scale factor 2, and keeps `rho` in `[5,140]`. Scaled duals are
+rescaled whenever `rho` changes.
+
+After the ordinary convergence test first passes, distributed methods use a
+fixed `rho=5` polishing phase with zero relative tolerance, primal and dual
+absolute tolerances `1e-3`, and at most 200 ADMM rounds per SCP subproblem.
+Failed convex solves are rebuilt cold with qpOASES reliable options. A final
+fallback permits two restoration attempts, shrinks the control trust region by
+0.5 down to 0.1, and assigns exact-penalty weight `1e4` to nonnegative obstacle
+and terminal slacks. Strict convergence requires maximum slack at most `1e-6`.
 
 Constant-density scenarios use 2.0 m pair and obstacle activation margins;
 fixed-workspace scenarios retain every constraint. All global safety checks
 retain every pair and obstacle. Benchmark matrices use a 120 second wall-time
-limit per scenario-method run. Revision 3 results may not be mixed with
-revision 2 results.
+limit per scenario-method run. Results from different experiment revisions may
+not be mixed.
 
 Before Monte Carlo evaluation, every method is run on a fixed difficulty
 ladder with explicit geometry and an outer-ring feasibility witness:
@@ -109,7 +116,8 @@ ladder with explicit geometry and an outer-ring feasibility witness:
 7. `very_hard_maze`: eight heterogeneous agents and sixteen maze polygons.
 
 All seven cases are correctness gates for `full` TurboADMM-NL and are executed
-by CTest with `--require-success`. Competitor failures remain in the results and
+by CTest with `--require-success --require-convergence`. Competitor failures
+remain in the results and
 define their measured boundary; they are not grounds for weakening or deleting
 a deterministic scenario. Monte Carlo evaluation starts after the full-method
 gate passes and retains every valid failure.
@@ -205,7 +213,10 @@ Each run emits one machine-readable row containing:
   and globalization timings;
 - cold, vector, and matrix hotstarts;
 - transported and reset pair-stage states;
-- dimension-aware primal and dual stopping thresholds; and
+- dimension-aware primal and dual stopping thresholds;
+- per-SCP objective, merit, residual, rho, trust-region, clearance, terminal,
+  QP return-code, restoration, and polishing traces;
+- restoration attempts and maximum/final elastic slack; and
 - timeout and peak memory when available.
 
 Report medians and quantiles for time and work, confidence intervals for
@@ -215,8 +226,8 @@ ADMM timeout, safety violation, dynamics violation, or terminal violation.
 
 ## Paper decision gates
 
-1. Correctness: `full` passes all seven deterministic cases in native and
-   OSQP-enabled WSL builds. Monte Carlo solver and validator failures are
+1. Correctness: `full` strictly converges on all seven deterministic cases in
+   the OSQP-enabled WSL Release build. Monte Carlo solver and validator failures are
    reported in the success distribution and are never discarded.
 2. Novelty: `full` produces a consistent and practically meaningful reduction
    in time or working-set recalculations relative to `inner` and

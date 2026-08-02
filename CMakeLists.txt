@@ -287,7 +287,7 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     add_test(
         NAME nonlinear_manual_full
         COMMAND nonlinear_benchmark
-            --suite manual --method full --require-success
+            --suite manual --method full --require-success --require-convergence
             --output ${CMAKE_BINARY_DIR}/nonlinear_manual_full.csv
     )
     set_tests_properties(nonlinear_manual_full PROPERTIES TIMEOUT 600)

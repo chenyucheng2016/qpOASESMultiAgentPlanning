@@ -70,9 +70,25 @@ def summarize(rows):
             if row.get("protocol_success", "0") == "1"
         ]
         success_count = len(successful)
+        converged_count = sum(row.get("converged", "0") == "1" for row in group)
         ci_low, ci_high = wilson_interval(success_count, len(group))
         times = finite(as_float(row, "solve_time_ms") for row in successful)
         objectives = finite(as_float(row, "objective") for row in successful)
+        terminal_errors = finite(
+            as_float(row, "maximum_terminal_error") for row in successful
+        )
+        pair_clearances = finite(
+            as_float(row, "minimum_pairwise_clearance") for row in successful
+        )
+        obstacle_clearances = finite(
+            as_float(row, "minimum_obstacle_clearance") for row in successful
+        )
+        dynamics_defects = finite(
+            as_float(row, "maximum_dynamics_defect") for row in successful
+        )
+        restoration_slacks = finite(
+            as_float(row, "final_restoration_slack") for row in successful
+        )
         backend_work = finite(as_float(row, "backend_iterations") for row in group)
         qp_work = finite(as_float(row, "qp_working_set_recalculations") for row in group)
         record = dict(zip(GROUP_FIELDS, key))
@@ -82,10 +98,20 @@ def summarize(rows):
             "success_rate": success_count / len(group),
             "success_ci95_low": ci_low,
             "success_ci95_high": ci_high,
+            "converged": converged_count,
+            "convergence_rate": converged_count / len(group),
             "time_median_ms": statistics.median(times) if times else math.nan,
             "time_q25_ms": quantile(times, 0.25),
             "time_q75_ms": quantile(times, 0.75),
+            "time_p95_ms": quantile(times, 0.95),
             "objective_median": statistics.median(objectives) if objectives else math.nan,
+            "objective_q25": quantile(objectives, 0.25),
+            "objective_q75": quantile(objectives, 0.75),
+            "maximum_terminal_error_max": max(terminal_errors) if terminal_errors else math.nan,
+            "minimum_pairwise_clearance_min": min(pair_clearances) if pair_clearances else math.nan,
+            "minimum_obstacle_clearance_min": min(obstacle_clearances) if obstacle_clearances else math.nan,
+            "maximum_dynamics_defect_max": max(dynamics_defects) if dynamics_defects else math.nan,
+            "final_restoration_slack_max": max(restoration_slacks) if restoration_slacks else math.nan,
             "backend_iterations_median": statistics.median(backend_work) if backend_work else math.nan,
             "working_set_recalculations_median": statistics.median(qp_work) if qp_work else math.nan,
         })

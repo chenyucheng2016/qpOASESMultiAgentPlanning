@@ -50,6 +50,16 @@ def parse_methods(value):
         raise argparse.ArgumentTypeError("unknown methods: " + ", ".join(unknown))
     return methods
 
+def parse_manual_cases(value):
+    cases = tuple(item.strip() for item in value.split(",") if item.strip())
+    unknown = sorted(set(cases) - set(MANUAL_CASES))
+    if unknown:
+        raise argparse.ArgumentTypeError("unknown manual cases: " + ", ".join(unknown))
+    if not cases:
+        raise argparse.ArgumentTypeError("manual cases must not be empty")
+    return cases
+
+
 def parse_indices(value):
     try:
         indices = tuple(int(item.strip()) for item in value.split(",") if item.strip())
@@ -151,6 +161,8 @@ def main():
                         choices=("all", "scaling", "models", "families"))
     parser.add_argument("--scenario-indices", type=parse_indices, default=(),
                         help="optional comma-separated scenario indices")
+    parser.add_argument("--manual-cases", type=parse_manual_cases, default=(),
+                        help="optional comma-separated deterministic case ids")
     parser.add_argument("--methods", type=parse_methods, default=METHODS)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--combined", default="results.csv")
@@ -182,8 +194,11 @@ def main():
     if arguments.suite == "manual":
         if arguments.scenario_indices:
             parser.error("--scenario-indices is only valid for generated suites")
-        selectors = tuple((case_id, ("--case", case_id)) for case_id in MANUAL_CASES)
+        selected_cases = arguments.manual_cases or MANUAL_CASES
+        selectors = tuple((case_id, ("--case", case_id)) for case_id in selected_cases)
     else:
+        if arguments.manual_cases:
+            parser.error("--manual-cases is only valid for the manual suite")
         count = discover_count(executable, arguments.suite, arguments.track, output_dir)
         indices = arguments.scenario_indices or tuple(range(count))
         if any(index >= count for index in indices):

@@ -1,11 +1,62 @@
 # TurboADMM-NL development benchmark status
 
-This is development evidence collected on 2026-08-01. It is not the locked
+This is development evidence collected on 2026-08-02. It is not the locked
 30-seed final-paper experiment. The WSL build used GCC 9.4, OpenMP, and OSQP
 1.x from `/usr/local/lib/libosqp.so`. Every scenario-method process had the
 same 120 second wall-time cap.
 
-## Revision 3 current verification
+## Revision 4 convergence-quality milestone
+
+Revision 4 removes the agent-count guard from residual-balanced rho adaptation,
+adds per-SCP machine-readable traces, and introduces a cold reliable-mode
+qpOASES restoration retry. If both the normal and reliable hard QPs fail, a
+second retry adds exact-penalty terminal and obstacle slacks while shrinking
+the control trust region. Convergence is forbidden until restoration slack is
+below `1e-6`. The medium doorway failure was qpOASES return code 36
+(`RET_INIT_FAILED_HOTSTART`) after a TQ factorization error, not geometric
+infeasibility; its reliable hard retry succeeds without using elastic slack.
+
+After the ordinary nonlinear convergence test first passes, every distributed
+case enters a fixed-rho polish with `rho=5`, zero relative ADMM tolerance,
+`1e-3` primal and dual absolute tolerances, and at most 200 ADMM rounds per SCP
+subproblem. CTest now requires both feasibility and strict convergence.
+
+The current seven-case WSL Release gate passes 7/7 strict convergence. Ten
+fresh-process repetitions of TurboADMM-NL pass 70/70; the five centralized
+OSQP cases that complete under the cap pass 50/50. Solver-time statistics are:
+
+| Scenario | n | m | Turbo median [IQR], p95 | OSQP median [IQR], p95 | OSQP / Turbo | Objective gap |
+|---|---:|---:|---:|---:|---:|---:|
+| easy open | 2 | 0 | 0.329 [0.317, 0.342], 0.358 s | 0.227 [0.219, 0.234], 0.243 s | 0.69x | +0.05% |
+| easy blocker | 2 | 1 | 0.545 [0.526, 0.566], 0.582 s | 0.624 [0.608, 0.636], 0.658 s | 1.14x | +0.06% |
+| medium doorway | 4 | 2 | 2.432 [2.322, 2.442], 2.505 s | 14.348 [14.213, 15.063], 15.874 s | 5.90x | +0.32% |
+| medium heterogeneous open | 4 | 0 | 4.113 [4.007, 4.234], 4.461 s | 2.171 [2.149, 2.212], 2.234 s | 0.53x | +1.23% |
+| hard heterogeneous doorway | 4 | 2 | 4.599 [4.524, 4.717], 4.773 s | 39.451 [39.235, 39.564], 39.840 s | 8.58x | -0.69% |
+| hard warehouse | 8 | 8 | 11.446 [11.341, 11.674], 11.944 s | timeout (>120 s) | >10.48x | N/A |
+| very hard maze | 8 | 16 | 26.354 [26.164, 26.797], 27.680 s | timeout (>120 s) | >4.55x | N/A |
+
+The two timeout rows use one censored OSQP execution from the same frozen WSL
+protocol; repeating a known 120 second censor ten times was intentionally
+avoided. On the five fully repeated comparisons, exact two-sided rank-sum tests
+give `p <= 7.58e-5`. Bootstrap 95% intervals for the OSQP/Turbo median-time
+ratio are `[5.81, 6.42]` for medium doorway and `[8.32, 8.75]` for hard
+heterogeneous doorway. The five tests remain significant after Holm correction.
+
+Every completed objective comparison is within the frozen 5% quality gate. In
+the 70 TurboADMM-NL repetitions, the worst terminal error is 1.9365 m under the
+2.5 m limit, minimum pairwise clearance is -0.000134 m, minimum obstacle
+clearance is -0.001381 m under the -0.01 m validator tolerance, dynamics defect
+is zero, and final restoration slack is zero. The repeated evidence supports a
+structural crossover claim, not a universal small-problem speed claim: OSQP is
+faster on easy open and four-agent heterogeneous open.
+
+Raw rows and per-process logs are under
+`build-ral-wsl/results/revision4_{turbo,osqp}_10/`; the combined summary is under
+`build-ral-wsl/results/revision4_comparison/`. These are development results;
+publication timing still requires the locked, preferably interleaved execution
+schedule and the full Monte Carlo matrix.
+
+## Revision 3 archived verification
 
 The current OSQP-enabled WSL Release build passes all 11 registered tests.
 The final post-tuning rerun of the seven-case `full` deterministic gate passed

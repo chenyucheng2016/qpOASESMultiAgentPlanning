@@ -74,33 +74,38 @@ and an independent post-solve validator confirms:
 - minimum pairwise clearance is at least `-collision_tolerance`;
 - minimum obstacle clearance is at least `-collision_tolerance`;
 - maximum nonlinear dynamics defect is at most `dynamics_tolerance`;
-- each terminal position error is at most the scenario tolerance; and
+- each terminal position error is at most the scenario tolerance;
+- every masked terminal-state equality satisfies its frozen tolerance; and
 - the solver terminates before the scenario timeout.
 
 Solver-reported success alone is not sufficient. Pairwise and obstacle safety
 are checked at trajectory knots and on interpolated substeps.
 
-Experiment revision 4 uses 20 collision samples per interval, 30 SCP
-iterations, at most 50 ADMM iterations per ordinary SCP subproblem, canonical
-penalty `rho=35`, absolute primal and dual tolerances of `1e-3` and `1e-2`,
-relative tolerance `1e-3`, over-relaxation `1.6`, merit penalty `1e7`, validator
-interpolation count 20, and terminal position tolerance 2.5. The first two SCP
-iterations use ADMM tolerance multipliers 5 and 3. Residual-balanced penalty
-adaptation is active at every agent count, is checked every five rounds, uses
-imbalance 10 and scale factor 2, and keeps `rho` in `[5,140]`. Scaled duals are
-rescaled whenever `rho` changes.
+Experiment revision 7 uses 20 collision samples per interval, at most 90 SCP
+iterations, and at most 50 ADMM iterations per ordinary SCP subproblem. The
+canonical penalty is `rho=35`; primal, dual, and relative tolerances are
+`1e-3`, `1e-2`, and `1e-3`; over-relaxation is `1.6`; merit penalty is `1e7`;
+validator interpolation count is 20; and terminal position tolerance is 2.5.
+Inexact early ADMM and residual-balanced penalty adaptation are disabled in
+the frozen deterministic comparison.
 
-After the ordinary convergence test first passes, distributed methods use a
-fixed `rho=5` polishing phase with zero relative tolerance, primal and dual
-absolute tolerances `1e-3`, and at most 200 ADMM rounds per SCP subproblem.
-Failed convex solves are rebuilt cold with qpOASES reliable options. A final
-fallback permits two restoration attempts, shrinks the control trust region by
-0.5 down to 0.1, and assigns exact-penalty weight `1e4` to nonnegative obstacle
-and terminal slacks. Strict convergence requires maximum slack at most `1e-6`.
+After the ordinary convergence test first passes, distributed methods retain
+canonical `rho=35` and use zero relative tolerance, primal and dual absolute
+tolerances `1e-3`, and at most 200 ADMM rounds per SCP subproblem. Failed
+convex solves are rebuilt cold with qpOASES reliable options. A final fallback
+permits two restoration attempts, shrinks the control trust region by 0.5 down
+to 0.1, and assigns exact-penalty weight `1e4` to nonnegative obstacle,
+corridor, and terminal slacks. Strict convergence requires both maximum and
+final slack at most `1e-6`.
+
+In the final half of SCP, exact consensus polishing is also activated when
+dynamics, terminal constraints, and static-obstacle constraints are feasible
+and pairwise clearance is the sole remaining defect. This gate is uniform
+across scenarios and does not change physical tolerances.
 
 Constant-density scenarios use 2.0 m pair and obstacle activation margins;
 fixed-workspace scenarios retain every constraint. All global safety checks
-retain every pair and obstacle. Benchmark matrices use a 120 second wall-time
+retain every pair and obstacle. Benchmark matrices use a 300 second wall-time
 limit per scenario-method run. Results from different experiment revisions may
 not be mixed.
 
@@ -115,12 +120,16 @@ ladder with explicit geometry and an outer-ring feasibility witness:
 6. `hard_warehouse`: eight heterogeneous agents and eight shelf polygons; and
 7. `very_hard_maze`: eight heterogeneous agents and sixteen maze polygons.
 
+The six headline cases exclude `medium_heterogeneous_open`, which remains a
+regression-only overhead control because it does not exercise collision or
+obstacle structure. It is never deleted from CTest.
+
 All seven cases are correctness gates for `full` TurboADMM-NL and are executed
-by CTest with `--require-success --require-convergence`. Competitor failures
-remain in the results and
+by CTest with `--require-success --require-convergence`. The six headline cases
+are timed for every competitor. Competitor failures remain in the results and
 define their measured boundary; they are not grounds for weakening or deleting
-a deterministic scenario. Monte Carlo evaluation starts after the full-method
-gate passes and retains every valid failure.
+a headline scenario. Monte Carlo evaluation starts after the full-method gate
+passes and retains every valid failure.
 
 ## Benchmark matrix
 
@@ -189,18 +198,35 @@ TurboADMM-NL uses the frozen automatic local-QP team size
 `T = min(n, max(4, ceil(n/2)), OpenMP maximum)`.
 
 An explicit positive `--threads` value is permitted only for the declared
-thread ablation. Deterministic timing tables use ten independent process
-executions per scenario-method pair and report median, interquartile range,
-and 95th percentile. Monte Carlo cells use one execution for each of 30 locked
+thread ablation. Deterministic timing tables use ten fresh process executions
+per scenario-method pair. Method order is rotated by scenario and repetition
+using schedule seed `20260804`; this prevents one method from always occupying
+the same thermal/order position. Report the median, interquartile range, and
+95th percentile. Monte Carlo cells use one execution for each of 30 locked
 seeds and paired seed-wise statistics. Solver-internal time and process wall
-time are both retained. Timeouts remain censored failures at 120 seconds.
+time are both retained. Timeouts remain censored failures at 300 seconds.
+
+Every run directory contains `run_manifest.json`, including the Git commit,
+executable SHA-256, exact solver flags, OpenMP policy, timeout, and complete
+task order. The runner rejects an attempt to resume that directory with a
+different binary or configuration.
+
+The one-repetition protocol check and locked ten-repetition run are launched
+from WSL with:
+
+```bash
+TURBOADMM_GIT_COMMIT=<commit> ./benchmarks/run_ral_deterministic_wsl.sh pilot
+TURBOADMM_GIT_COMMIT=<commit> ./benchmarks/run_ral_deterministic_wsl.sh final
+```
 
 ## Recorded metrics
 
 Each run emits one machine-readable row containing:
 
 - scenario family, density regime, seed, `n`, `m`, and model composition;
-- method, configuration, Git commit, compiler, CPU, and thread count;
+- method, solver configuration, and actual thread count;
+- the run manifest separately records the Git commit, executable hash,
+  environment policy, and task order;
 - solver success, validator success, status, and failure category;
 - total wall time and maximum per-agent local-QP time;
 - objective and objective gap to the best feasible centralized solution;
@@ -226,9 +252,9 @@ ADMM timeout, safety violation, dynamics violation, or terminal violation.
 
 ## Paper decision gates
 
-1. Correctness: `full` strictly converges on all seven deterministic cases in
-   the OSQP-enabled WSL Release build. Monte Carlo solver and validator failures are
-   reported in the success distribution and are never discarded.
+1. Correctness: `full` strictly converges on all seven deterministic gates in
+   the OSQP-enabled WSL Release build. Monte Carlo solver and validator failures
+   are reported in the success distribution and are never discarded.
 2. Novelty: `full` produces a consistent and practically meaningful reduction
    in time or working-set recalculations relative to `inner` and
    `qp_continuation`, without a worse success rate or objective distribution.
@@ -238,7 +264,12 @@ ADMM timeout, safety violation, dynamics violation, or terminal violation.
    separately. In the local regime, active degree must remain bounded while
    centralized QP dimensions grow with total problem size. Solver crossover
    claims are based on locked paired results, not selected successful examples.
-4. Reproducibility: a clean build can run tests, smoke benchmarks, analysis,
+4. External comparison: on a frozen CSDO-compatible congested family, compare
+   both methods with the same PBS/Hybrid-A* front end and independent validator.
+   A recovery or trajectory-quality claim requires a family-level paired effect,
+   not one hand-selected failure. Runtime is retained as a secondary metric even
+   when recovery success is the primary comparison.
+5. Reproducibility: a clean build can run tests, smoke benchmarks, analysis,
    and figure generation from documented commands.
 
 If the novelty gate fails, the paper claim must be revised before running the

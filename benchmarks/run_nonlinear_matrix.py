@@ -3,11 +3,14 @@
 
 import argparse
 import csv
+import hashlib
+import json
 import os
 import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -48,6 +51,8 @@ def parse_methods(value):
     unknown = sorted(set(methods) - set(METHODS))
     if unknown:
         raise argparse.ArgumentTypeError("unknown methods: " + ", ".join(unknown))
+    if not methods:
+        raise argparse.ArgumentTypeError("methods must not be empty")
     return methods
 
 def parse_manual_cases(value):
@@ -68,6 +73,87 @@ def parse_indices(value):
     if not indices or any(index < 0 for index in indices):
         raise argparse.ArgumentTypeError("scenario indices must be nonnegative")
     return indices
+
+
+def build_tasks(selectors, methods, repetitions, run_dir, schedule, schedule_seed):
+    tasks = []
+
+    def append_task(selector, selector_arguments, method, repetition):
+        suffix = "" if repetitions == 1 else f"__rep_{repetition:02d}"
+        result_path = run_dir / f"{selector}__{method}{suffix}.csv"
+        tasks.append((selector, method, repetition, result_path, selector_arguments))
+
+    if schedule == "grouped":
+        for selector, selector_arguments in selectors:
+            for method in methods:
+                for repetition in range(1, repetitions + 1):
+                    append_task(selector, selector_arguments, method, repetition)
+        return tasks
+
+    for repetition in range(1, repetitions + 1):
+        for selector_index, (selector, selector_arguments) in enumerate(selectors):
+            offset = (schedule_seed + selector_index + repetition - 1) % len(methods)
+            method_order = methods[offset:] + methods[:offset]
+            for method in method_order:
+                append_task(selector, selector_arguments, method, repetition)
+    return tasks
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def write_run_manifest(path, arguments, executable, tasks, status_path):
+    configuration = {
+        "protocol_id": arguments.protocol_id,
+        "git_commit": arguments.git_commit,
+        "executable": str(executable),
+        "executable_sha256": sha256(executable),
+        "suite": arguments.suite,
+        "track": arguments.track,
+        "manual_cases": list(arguments.manual_cases),
+        "scenario_indices": list(arguments.scenario_indices),
+        "methods": list(arguments.methods),
+        "repetitions": arguments.repetitions,
+        "timeout_seconds": arguments.timeout_seconds,
+        "threads": arguments.threads,
+        "fixed_rho": arguments.fixed_rho,
+        "exact_admm": arguments.exact_admm,
+        "schedule": arguments.schedule,
+        "schedule_seed": arguments.schedule_seed,
+        "omp_dynamic": "FALSE",
+        "omp_proc_bind": "close",
+        "omp_places": "cores",
+        "task_order": [
+            {"selector": task[0], "method": task[1], "repetition": task[2]}
+            for task in tasks
+        ],
+    }
+    if path.exists():
+        with path.open(encoding="utf-8") as stream:
+            existing = json.load(stream)
+        if existing.get("configuration") != configuration:
+            raise RuntimeError(
+                "output directory contains a different run manifest; use a new directory"
+            )
+        return
+    if arguments.protocol_id != "development-unfrozen" and status_path.exists():
+        raise RuntimeError(
+            "frozen protocol output predates its manifest; use a new output directory"
+        )
+    manifest = {
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "configuration": configuration,
+    }
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8") as stream:
+        json.dump(manifest, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+    os.replace(temporary, path)
 
 
 def read_single_result(path):
@@ -164,6 +250,8 @@ def main():
     parser.add_argument("--manual-cases", type=parse_manual_cases, default=(),
                         help="optional comma-separated deterministic case ids")
     parser.add_argument("--methods", type=parse_methods, default=METHODS)
+    parser.add_argument("--protocol-id", default="development-unfrozen")
+    parser.add_argument("--git-commit", default="unknown")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--combined", default="results.csv")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
@@ -171,6 +259,11 @@ def main():
                         help="positive fixed thread count; zero uses the frozen automatic policy")
     parser.add_argument("--repetitions", type=int, default=1,
                         help="number of independent process executions per scenario-method pair")
+    parser.add_argument("--schedule", choices=("grouped", "interleaved"),
+                        default="grouped")
+    parser.add_argument("--schedule-seed", type=int, default=0)
+    parser.add_argument("--fixed-rho", action="store_true")
+    parser.add_argument("--exact-admm", action="store_true")
     parser.add_argument("--rerun-failures", action="store_true")
     arguments = parser.parse_args()
 
@@ -209,19 +302,17 @@ def main():
             for index in indices
         )
 
-    tasks = []
-    for selector, selector_arguments in selectors:
-        for method in arguments.methods:
-            for repetition in range(1, arguments.repetitions + 1):
-                suffix = "" if arguments.repetitions == 1 else f"__rep_{repetition:02d}"
-                result_path = run_dir / f"{selector}__{method}{suffix}.csv"
-                tasks.append((selector, method, repetition, result_path, selector_arguments))
-
+    tasks = build_tasks(
+        selectors, arguments.methods, arguments.repetitions, run_dir,
+        arguments.schedule, arguments.schedule_seed,
+    )
     total = len(tasks)
     environment = os.environ.copy()
     environment["OMP_DYNAMIC"] = "FALSE"
     environment["OMP_PROC_BIND"] = "close"
     environment["OMP_PLACES"] = "cores"
+    write_run_manifest(
+        output_dir / "run_manifest.json", arguments, executable, tasks, status_path)
     for index, (selector, method, repetition, result_path, selector_arguments) in enumerate(tasks, 1):
         key = (selector, method, repetition)
         existing = read_single_result(result_path)
@@ -248,6 +339,10 @@ def main():
         ]
         if arguments.threads > 0:
             command += ["--threads", str(arguments.threads)]
+        if arguments.fixed_rho:
+            command.append("--fixed-rho")
+        if arguments.exact_admm:
+            command.append("--exact-admm")
         command += list(selector_arguments)
         print(f"[{index}/{total}] run {selector} {method}", flush=True)
         started = time.monotonic()

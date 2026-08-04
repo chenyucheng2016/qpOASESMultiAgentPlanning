@@ -65,8 +65,18 @@ struct NonlinearAgentProblem
     std::vector<real_t> stateUpperBounds;
     std::vector<real_t> controlLowerBounds;
     std::vector<real_t> controlUpperBounds;
+    /** Optional full-state warm start for infeasible-start full-space SCP. */
+    std::vector<real_t> initialStates;
     std::vector<real_t> initialControls;
     std::vector<CollisionCircle> collisionCircles;
+    /**
+     * Optional collision-point corridors, laid out as
+     * [stage][collision circle][position coordinate]. When populated, local
+     * QPs use these convex corridors for static-obstacle avoidance while the
+     * original obstacles remain authoritative for nonlinear validation.
+     */
+    std::vector<real_t> collisionCorridorLowerBounds;
+    std::vector<real_t> collisionCorridorUpperBounds;
     /** Fix every terminal state component to the final state reference. */
     bool enforceTerminalState;
     /** Optional per-state mask used when enforceTerminalState is true. */
@@ -98,6 +108,8 @@ struct NonlinearTurboOptions
     real_t inexactAdmmToleranceMultiplier;
     int_t polishingAdmmIterations;
     real_t safetyDistance;
+    /** Additional pairwise planning clearance; obstacle geometry is unchanged. */
+    real_t pairSafetyBuffer;
     real_t obstacleSafetyDistance;
     real_t controlTrustRegion;
     int_t maxRestorationAttempts;
@@ -110,6 +122,7 @@ struct NonlinearTurboOptions
     real_t admmRelativeTolerance;
     real_t admmRelaxation;
     real_t scpStepTolerance;
+    real_t dynamicsTolerance;
     real_t collisionTolerance;
     real_t terminalPositionTolerance;
     real_t meritPenalty;
@@ -138,6 +151,9 @@ struct NonlinearTurboStatistics
     int_t lastQpStatus;
     int_t failedAgent;
     int_t coldStarts;
+    int_t riccatiInitializations;
+    int_t riccatiFailures;
+    int_t hotstartFallbacks;
     int_t matrixHotstarts;
     int_t vectorHotstarts;
     int_t transportedPairStages;
@@ -147,6 +163,7 @@ struct NonlinearTurboStatistics
     int_t rhoUpdates;
     int_t restorationAttempts;
     int_t successfulRestorations;
+    int_t lineSearchRecoveryAttempts;
     int_t polishingScpIterations;
     int_t admmConvergedSubproblems;
     int_t admmIterationLimitSubproblems;
@@ -157,6 +174,7 @@ struct NonlinearTurboStatistics
     int_t maximumAgentDegree;
     int_t maximumActiveObstaclesPerAgent;
     int_t maximumPotentialObstaclesPerAgent;
+    int_t maximumCorridorRowsPerAgent;
     int_t maximumLocalQpVariables;
     int_t maximumLocalQpConstraints;
     int_t centralizedQpVariables;
@@ -179,6 +197,10 @@ struct NonlinearTurboStatistics
     real_t objective;
     real_t solveTimeMilliseconds;
     real_t maximumLocalQpSolveTimeMilliseconds;
+    real_t riccatiTimeMilliseconds;
+    real_t coldStartQpTimeMilliseconds;
+    real_t matrixHotstartQpTimeMilliseconds;
+    real_t vectorHotstartQpTimeMilliseconds;
     real_t qpBuildTimeMilliseconds;
     real_t pairBuildTimeMilliseconds;
     real_t admmAssemblyTimeMilliseconds;
@@ -201,6 +223,7 @@ struct NonlinearScpIterationStatistics
     bool qpSolved;
     bool admmConverged;
     bool restorationUsed;
+    bool lineSearchRecovery;
     bool polishing;
     bool stepAccepted;
     real_t objective;
@@ -212,8 +235,10 @@ struct NonlinearScpIterationStatistics
     real_t maximumRestorationSlack;
     real_t stepLength;
     real_t maximumControlStep;
+    real_t maximumQpControlStep;
     real_t minimumPairwiseClearance;
     real_t minimumObstacleClearance;
+    real_t maximumDynamicsDefect;
     real_t maximumTerminalPositionError;
     NonlinearScpIterationStatistics();
 };

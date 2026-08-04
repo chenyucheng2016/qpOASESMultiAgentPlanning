@@ -10,6 +10,7 @@ struct NonlinearValidationOptions
     int_t interpolationSubsteps;
     real_t dynamicsTolerance;
     real_t terminalPositionTolerance;
+    real_t terminalStateTolerance;
     NonlinearValidationOptions();
 };
 
@@ -21,6 +22,7 @@ struct NonlinearValidationResult
     real_t minimumObstacleClearance;
     real_t maximumDynamicsDefect;
     real_t maximumTerminalPositionError;
+    real_t maximumTerminalStateError;
     NonlinearValidationResult();
 };
 

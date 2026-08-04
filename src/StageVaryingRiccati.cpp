@@ -84,6 +84,8 @@ bool StageVaryingLqrProblem::hasValidDimensions() const
         && c.size() == static_cast<std::size_t>(horizon * nx)
         && Q.size() == static_cast<std::size_t>(horizon * nx * nx)
         && R.size() == static_cast<std::size_t>(horizon * nu * nu)
+        && (stateControl.empty()
+            || stateControl.size() == static_cast<std::size_t>(horizon * nx * nu))
         && q.size() == static_cast<std::size_t>(horizon * nx)
         && r.size() == static_cast<std::size_t>(horizon * nu)
         && Qterminal.size() == static_cast<std::size_t>(nx * nx)
@@ -115,6 +117,9 @@ bool solveStageVaryingLqr(
         const real_t* ck = &problem.c[k * nx];
         const real_t* Qk = &problem.Q[k * nx * nx];
         const real_t* Rk = &problem.R[k * nu * nu];
+        const real_t* Nk = problem.stateControl.empty()
+            ? static_cast<const real_t*>(0)
+            : &problem.stateControl[k * nx * nu];
         const real_t* qk = &problem.q[k * nx];
         const real_t* rk = &problem.r[k * nu];
         std::vector<real_t> PA(nx * nx, 0.0);
@@ -145,8 +150,11 @@ bool solveStageVaryingLqr(
                     S[i * nu + j] += Bk[l * nu + i] * PB[l * nu + j];
             }
             for (j = 0; j < nx; ++j)
+            {
+                if (Nk != 0) G[i * nx + j] += Nk[j * nu + i];
                 for (l = 0; l < nx; ++l)
                     G[i * nx + j] += Bk[l * nu + i] * PA[l * nx + j];
+            }
             h[i] = rk[i];
             for (l = 0; l < nx; ++l) h[i] += Bk[l * nu + i] * pc[l];
             for (j = 0; j < nx; ++j) rhs[i * (nx + 1) + j] = G[i * nx + j];
@@ -219,12 +227,18 @@ bool solveStageVaryingLqr(
         const real_t* x = &solution.states[k * nx];
         const real_t* Ak = &problem.A[k * nx * nx];
         const real_t* nextLambda = &solution.costates[(k + 1) * nx];
+        const real_t* Nk = problem.stateControl.empty()
+            ? static_cast<const real_t*>(0)
+            : &problem.stateControl[k * nx * nu];
+        const real_t* u = &solution.controls[k * nu];
         real_t* lambda = &solution.costates[k * nx];
         for (i = 0; i < nx; ++i)
         {
             lambda[i] = problem.q[k * nx + i];
             for (j = 0; j < nx; ++j)
                 lambda[i] += problem.Q[k * nx * nx + i * nx + j] * x[j];
+            if (Nk != 0)
+                for (j = 0; j < nu; ++j) lambda[i] += Nk[i * nu + j] * u[j];
             for (j = 0; j < nx; ++j) lambda[i] += Ak[j * nx + i] * nextLambda[j];
         }
     }

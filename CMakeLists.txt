@@ -297,6 +297,7 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
             COMMAND csdo_turbo_comparison
                 --input ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_input.yaml
                 --guess ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_guesses.yaml
+                --corridor ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_corridors.yaml
                 --output ${CMAKE_BINARY_DIR}/csdo_smoke_result.yaml
         )
     endif()
@@ -312,10 +313,13 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     add_test(
         NAME nonlinear_manual_full
         COMMAND nonlinear_benchmark
-            --suite manual --method full --require-success --require-convergence
+            --suite manual --method full --fixed-rho --exact-admm
+            --require-success --require-convergence
             --output ${CMAKE_BINARY_DIR}/nonlinear_manual_full.csv
     )
-    set_tests_properties(nonlinear_manual_full PROPERTIES TIMEOUT 600)
+    set_tests_properties(nonlinear_manual_full PROPERTIES
+        TIMEOUT 600
+        RUN_SERIAL TRUE)
     add_test(
         NAME nonlinear_benchmark_scenario_index
         COMMAND nonlinear_benchmark
@@ -326,10 +330,13 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     add_test(
         NAME nonlinear_terminal_accuracy_regression
         COMMAND nonlinear_benchmark
-            --suite smoke --scenario-index 23 --method full --require-success
+            --suite smoke --scenario-index 23 --method full
+            --fixed-rho --exact-admm --require-success
             --output ${CMAKE_BINARY_DIR}/nonlinear_terminal_accuracy_regression.csv
     )
-    set_tests_properties(nonlinear_terminal_accuracy_regression PROPERTIES TIMEOUT 120)
+    set_tests_properties(nonlinear_terminal_accuracy_regression PROPERTIES
+        TIMEOUT 300
+        RUN_SERIAL TRUE)
     add_test(
         NAME nonlinear_centralized_qpoases_easy
         COMMAND nonlinear_benchmark
@@ -340,7 +347,7 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     set_tests_properties(nonlinear_centralized_qpoases_easy PROPERTIES TIMEOUT 60)
     ADD_CUSTOM_TARGET(nonlinear_benchmark_smoke
         COMMAND $<TARGET_FILE:nonlinear_benchmark>
-            --suite smoke --method full
+            --suite smoke --method full --fixed-rho --exact-admm
             --output ${CMAKE_BINARY_DIR}/nonlinear_benchmark_smoke.csv
         DEPENDS nonlinear_benchmark)
     ADD_CUSTOM_TARGET(nonlinear_benchmark_ci

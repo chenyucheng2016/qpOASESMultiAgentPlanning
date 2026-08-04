@@ -1,0 +1,9 @@
+priority,instance,agents,mode
+east_first,packed_priority_east_first.yaml,5,recovery
+east_reverse,packed_priority_east_reverse.yaml,5,recovery
+west_first,packed_priority_west_first.yaml,5,recovery
+west_reverse_first,packed_priority_west_reverse_first.yaml,5,recovery
+full_reverse,packed_priority_full_reverse.yaml,5,recovery
+alternate_east,packed_priority_alternate_east.yaml,5,recovery
+alternate_west,packed_priority_alternate_west.yaml,5,recovery
+center_out,packed_priority_center_out.yaml,5,recovery

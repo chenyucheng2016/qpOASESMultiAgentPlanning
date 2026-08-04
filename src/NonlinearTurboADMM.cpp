@@ -23,7 +23,7 @@ namespace
 
 struct AgentQp
 {
-    int_t N, nx, nu, np, nV, nC, activeObstacleCount;
+    int_t N, nx, nu, np, nV, nC, activeObstacleCount, corridorRows;
     int_t trajectoryVariableCount, slackVariableCount;
     std::vector<real_t> Hbase, gbase, H, g, A, lb, ub, lbA, ubA;
     std::vector<real_t> dynamicsA, dynamicsB, dynamicsC;
@@ -59,10 +59,14 @@ struct CollisionLinearization
 struct SolverPool
 {
     std::vector<SQProblem*> solvers;
+    std::vector<int_t> variableCounts;
+    std::vector<int_t> constraintCounts;
     void reset()
     {
         for (std::size_t i = 0; i < solvers.size(); ++i) delete solvers[i];
         solvers.clear();
+        variableCounts.clear();
+        constraintCounts.clear();
     }
     ~SolverPool() { reset(); }
 };
@@ -522,10 +526,39 @@ bool validateProblems(const std::vector<NonlinearAgentProblem>& agents, std::str
             || (!p.stateUpperBounds.empty() && p.stateUpperBounds.size() != static_cast<std::size_t>(nx))
             || (!p.controlLowerBounds.empty() && p.controlLowerBounds.size() != static_cast<std::size_t>(nu))
             || (!p.controlUpperBounds.empty() && p.controlUpperBounds.size() != static_cast<std::size_t>(nu))
-            || (!p.initialControls.empty() && p.initialControls.size() != static_cast<std::size_t>(N * nu)))
+            || (!p.initialStates.empty()
+                && p.initialStates.size()
+                    != static_cast<std::size_t>((N + 1) * nx))
+            || (!p.initialControls.empty()
+                && p.initialControls.size() != static_cast<std::size_t>(N * nu)))
         {
             error = "bound or initial-control dimensions are inconsistent";
             return false;
+        }
+        const int_t corridorCircleCount = p.collisionCircles.empty()
+            ? 1 : static_cast<int_t>(p.collisionCircles.size());
+        const std::size_t corridorSize = static_cast<std::size_t>(
+            (N + 1) * corridorCircleCount * p.model->positionDimension());
+        if (p.collisionCorridorLowerBounds.empty()
+            != p.collisionCorridorUpperBounds.empty()
+            || (!p.collisionCorridorLowerBounds.empty()
+                && (p.collisionCorridorLowerBounds.size() != corridorSize
+                    || p.collisionCorridorUpperBounds.size() != corridorSize)))
+        {
+            error = "collision-corridor dimensions are inconsistent";
+            return false;
+        }
+        for (std::size_t corridor = 0;
+             corridor < p.collisionCorridorLowerBounds.size(); ++corridor)
+        {
+            const real_t lower = p.collisionCorridorLowerBounds[corridor];
+            const real_t upper = p.collisionCorridorUpperBounds[corridor];
+            if (!std::isfinite(lower) || !std::isfinite(upper)
+                || lower > upper)
+            {
+                error = "collision corridors require finite ordered bounds";
+                return false;
+            }
         }
         if (!p.terminalStateConstraintMask.empty()
             && p.terminalStateConstraintMask.size()
@@ -633,6 +666,50 @@ void worldCollisionPosition(
         geometry.lateralOffset,
         position
     );
+}
+
+real_t endpointFeasiblePairBuffer(
+    const NonlinearAgentProblem& first,
+    int_t firstCircle,
+    const NonlinearAgentProblem& second,
+    int_t secondCircle,
+    const NonlinearTurboOptions& options)
+{
+    real_t buffer = options.pairSafetyBuffer;
+    if (buffer <= 0.0) return 0.0;
+    const int_t dimension = std::max(
+        first.model->positionDimension(), second.model->positionDimension());
+    const CollisionCircle firstGeometry = collisionCircleForAgent(
+        first, firstCircle, options);
+    const CollisionCircle secondGeometry = collisionCircleForAgent(
+        second, secondCircle, options);
+    const real_t physicalDistance =
+        firstGeometry.radius + secondGeometry.radius;
+    std::vector<real_t> firstPosition(dimension, 0.0);
+    std::vector<real_t> secondPosition(dimension, 0.0);
+    const int_t firstNx = first.model->stateDimension();
+    const int_t secondNx = second.model->stateDimension();
+    for (int_t endpoint = 0; endpoint < 2; ++endpoint)
+    {
+        const real_t* firstState = endpoint == 0
+            ? &first.initialState[0]
+            : &first.stateReference[first.horizon * firstNx];
+        const real_t* secondState = endpoint == 0
+            ? &second.initialState[0]
+            : &second.stateReference[second.horizon * secondNx];
+        worldCollisionPosition(
+            first, firstCircle, firstState, dimension, &firstPosition[0]);
+        worldCollisionPosition(
+            second, secondCircle, secondState, dimension, &secondPosition[0]);
+        real_t squaredDistance = 0.0;
+        for (int_t coordinate = 0; coordinate < dimension; ++coordinate)
+            squaredDistance += (firstPosition[coordinate]
+                - secondPosition[coordinate]) * (firstPosition[coordinate]
+                - secondPosition[coordinate]);
+        buffer = std::min(buffer, std::max(
+            0.0, std::sqrt(squaredDistance) - physicalDistance));
+    }
+    return buffer;
 }
 
 void linearizeCollisionTrajectory(
@@ -791,16 +868,28 @@ void buildAgentQp(
     qp.trajectoryVariableCount = (qp.N + 1) * qp.nx + qp.N * qp.nu;
     const int_t dynamicsRows = qp.N * qp.nx;
     const int_t obstacleSamples = qp.N * samplesPerInterval;
-    const std::vector<ActiveObstacle> activeObstacles = selectActiveObstacles(
-        p, nominalStates, obstacles, obstacleSafetyDistance,
-        obstacleActivationDistance, samplesPerInterval);
+    const int_t circleCount = collisionCircleCount(p);
+    const int_t nativePositionDimension = p.model->positionDimension();
+    const bool useCorridors = !p.collisionCorridorLowerBounds.empty();
+    std::vector<ActiveObstacle> activeObstacles;
+    if (!useCorridors)
+        activeObstacles = selectActiveObstacles(
+            p, nominalStates, obstacles, obstacleSafetyDistance,
+            obstacleActivationDistance, samplesPerInterval);
     qp.activeObstacleCount = static_cast<int_t>(activeObstacles.size());
 
     const int_t obstacleRows = obstacleSamples * qp.activeObstacleCount;
+    qp.corridorRows = useCorridors
+        ? (qp.N + 1) * circleCount * nativePositionDimension : 0;
+    const int_t corridorConstraintRows = elasticConstraints
+        ? 2 * qp.corridorRows : qp.corridorRows;
     const int_t terminalRows = p.model->positionDimension();
-    qp.slackVariableCount = elasticConstraints ? terminalRows + obstacleRows : 0;
+    const int_t obstacleSlackCount = qp.N * qp.activeObstacleCount;
+    const int_t corridorSlackCount = qp.corridorRows > 0 ? 1 : 0;
+    qp.slackVariableCount = elasticConstraints
+        ? terminalRows + obstacleSlackCount + corridorSlackCount : 0;
     qp.nV = qp.trajectoryVariableCount + qp.slackVariableCount;
-    qp.nC = dynamicsRows + obstacleRows
+    qp.nC = dynamicsRows + obstacleRows + corridorConstraintRows
         + (elasticConstraints ? 2 * terminalRows : terminalRows);
     qp.Hbase.assign(qp.nV * qp.nV, 0.0);
     qp.gbase.assign(qp.nV, 0.0);
@@ -893,7 +982,7 @@ void buildAgentQp(
     const real_t terminalCoordinateTolerance = terminalPositionTolerance
         / std::sqrt(static_cast<real_t>(terminalRows));
     const int_t terminalOffset = dynamicsRows
-        + obstacleSamples * qp.activeObstacleCount;
+        + obstacleSamples * qp.activeObstacleCount + corridorConstraintRows;
     const int_t terminalState = stateIndex(qp, qp.N);
     const real_t* terminalC = &qp.positionC[qp.N * qp.np * qp.nx];
     const real_t* terminalD = &qp.positionD[qp.N * qp.np];
@@ -979,11 +1068,10 @@ void buildAgentQp(
             qp.Hbase[(secondControl + i) * qp.nV + firstControl + i] -= weight;
         }
     }
-    const int_t circleCount = collisionCircleCount(p);
     std::vector<CollisionLinearization> nominalCollisions(circleCount);
     std::vector<CollisionLinearization> homotopyCollisions(circleCount);
     std::vector<CollisionLinearization> referenceCollisions(circleCount);
-    if (!activeObstacles.empty())
+    if (!activeObstacles.empty() || useCorridors)
     {
     for (int_t circle = 0; circle < circleCount; ++circle)
     {
@@ -1134,9 +1222,61 @@ void buildAgentQp(
             qp.ubA[row] = INFTY;
             if (elasticConstraints)
             {
+                const int_t interval = (sample - 1) / samplesPerInterval;
                 const int_t slack = qp.trajectoryVariableCount + terminalRows
-                    + static_cast<int_t>(activeObstacle) * obstacleSamples + sample - 1;
+                    + static_cast<int_t>(activeObstacle) * qp.N + interval;
                 qp.A[row * qp.nV + slack] = 1.0;
+            }
+        }
+    }
+    if (useCorridors)
+    {
+        const int_t corridorOffset = dynamicsRows + obstacleRows;
+        for (int_t circle = 0; circle < circleCount; ++circle)
+        for (int_t stage = 0; stage <= qp.N; ++stage)
+        {
+            const CollisionLinearization& collision = nominalCollisions[circle];
+            const int_t stateOffset = stateIndex(qp, stage);
+            const real_t* C = &collision.C[stage * qp.np * qp.nx];
+            const real_t* d = &collision.D[stage * qp.np];
+            for (int_t coordinate = 0;
+                 coordinate < nativePositionDimension; ++coordinate)
+            {
+                const int_t corridorIndex =
+                    (stage * circleCount + circle) * nativePositionDimension
+                    + coordinate;
+                const real_t lower =
+                    p.collisionCorridorLowerBounds[corridorIndex]
+                        - d[coordinate];
+                const real_t upper =
+                    p.collisionCorridorUpperBounds[corridorIndex]
+                        - d[coordinate];
+                if (!elasticConstraints)
+                {
+                    const int_t row = corridorOffset + corridorIndex;
+                    for (int_t state = 0; state < qp.nx; ++state)
+                        qp.A[row * qp.nV + stateOffset + state] =
+                            C[coordinate * qp.nx + state];
+                    qp.lbA[row] = lower;
+                    qp.ubA[row] = upper;
+                    continue;
+                }
+                const int_t lowerRow = corridorOffset + 2 * corridorIndex;
+                const int_t upperRow = lowerRow + 1;
+                const int_t slackOffset = qp.trajectoryVariableCount
+                    + terminalRows + obstacleSlackCount;
+                for (int_t state = 0; state < qp.nx; ++state)
+                {
+                    const real_t value = C[coordinate * qp.nx + state];
+                    qp.A[lowerRow * qp.nV + stateOffset + state] = value;
+                    qp.A[upperRow * qp.nV + stateOffset + state] = value;
+                }
+                qp.A[lowerRow * qp.nV + slackOffset] = 1.0;
+                qp.lbA[lowerRow] = lower;
+                qp.ubA[lowerRow] = INFTY;
+                qp.A[upperRow * qp.nV + slackOffset] = -1.0;
+                qp.lbA[upperRow] = -INFTY;
+                qp.ubA[upperRow] = upper;
             }
         }
     }
@@ -1247,7 +1387,9 @@ std::vector<PairData> buildPairs(
             agents[first], firstCircle, options);
         const CollisionCircle secondGeometry = collisionCircleForAgent(
             agents[second], secondCircle, options);
-        pair.safetyDistance = firstGeometry.radius + secondGeometry.radius;
+        pair.safetyDistance = firstGeometry.radius + secondGeometry.radius
+            + endpointFeasiblePairBuffer(
+                agents[first], firstCircle, agents[second], secondCircle, options);
         const PairData* previous = 0;
         if (previousPairs != 0)
             for (std::size_t oldPair = 0; oldPair < previousPairs->size(); ++oldPair)
@@ -1493,42 +1635,125 @@ void addAdmmTerms(int_t agentIndex, const std::vector<PairData>& pairs,
     }
 }
 
-std::vector<real_t> riccatiWarmStart(const NonlinearAgentProblem& p, const AgentQp& qp)
+bool riccatiWarmStart(
+    const NonlinearAgentProblem& p,
+    const AgentQp& qp,
+    std::vector<real_t>& warm)
 {
-    StageVaryingLqrProblem lqr; StageVaryingLqrSolution solution;
-    lqr.horizon = qp.N; lqr.nx = qp.nx; lqr.nu = qp.nu; lqr.x0 = p.initialState;
-    lqr.A = qp.dynamicsA; lqr.B = qp.dynamicsB; lqr.c = qp.dynamicsC;
-    lqr.Q.assign(qp.N * qp.nx * qp.nx, 0.0); lqr.R.assign(qp.N * qp.nu * qp.nu, 0.0);
-    lqr.q.assign(qp.N * qp.nx, 0.0); lqr.r.assign(qp.N * qp.nu, 0.0);
-    lqr.Qterminal.assign(qp.nx * qp.nx, 0.0); lqr.qterminal.assign(qp.nx, 0.0);
+    const int_t augmentedNx = qp.nx + qp.nu;
+    StageVaryingLqrProblem lqr;
+    StageVaryingLqrSolution solution;
+    lqr.horizon = qp.N;
+    lqr.nx = augmentedNx;
+    lqr.nu = qp.nu;
+    lqr.x0.assign(augmentedNx, 0.0);
+    std::copy(p.initialState.begin(), p.initialState.end(), lqr.x0.begin());
+    for (int_t control = 0; control < qp.nu; ++control)
+        lqr.x0[qp.nx + control] =
+            p.controlReference.empty() ? 0.0 : p.controlReference[control];
+    lqr.A.assign(qp.N * augmentedNx * augmentedNx, 0.0);
+    lqr.B.assign(qp.N * augmentedNx * qp.nu, 0.0);
+    lqr.c.assign(qp.N * augmentedNx, 0.0);
+    lqr.Q.assign(qp.N * augmentedNx * augmentedNx, 0.0);
+    lqr.R.assign(qp.N * qp.nu * qp.nu, 0.0);
+    lqr.stateControl.assign(qp.N * augmentedNx * qp.nu, 0.0);
+    lqr.q.assign(qp.N * augmentedNx, 0.0);
+    lqr.r.assign(qp.N * qp.nu, 0.0);
+    lqr.Qterminal.assign(augmentedNx * augmentedNx, 0.0);
+    lqr.qterminal.assign(augmentedNx, 0.0);
     for (int_t k = 0; k < qp.N; ++k)
     {
+        const real_t* Ak = &qp.dynamicsA[k * qp.nx * qp.nx];
+        const real_t* Bk = &qp.dynamicsB[k * qp.nx * qp.nu];
+        for (int_t row = 0; row < qp.nx; ++row)
+        {
+            for (int_t column = 0; column < qp.nx; ++column)
+                lqr.A[k * augmentedNx * augmentedNx
+                    + row * augmentedNx + column] = Ak[row * qp.nx + column];
+            for (int_t control = 0; control < qp.nu; ++control)
+                lqr.B[k * augmentedNx * qp.nu + row * qp.nu + control] =
+                    Bk[row * qp.nu + control];
+            lqr.c[k * augmentedNx + row] = qp.dynamicsC[k * qp.nx + row];
+        }
+        for (int_t control = 0; control < qp.nu; ++control)
+            lqr.B[k * augmentedNx * qp.nu
+                + (qp.nx + control) * qp.nu + control] = 1.0;
         for (int_t i = 0; i < qp.nx; ++i)
         {
-            lqr.Q[k * qp.nx * qp.nx + i * qp.nx + i] = p.stateWeights[i];
-            lqr.q[k * qp.nx + i] = -p.stateWeights[i] * p.stateReference[k * qp.nx + i];
+            lqr.Q[k * augmentedNx * augmentedNx + i * augmentedNx + i]
+                = p.stateWeights[i];
+            lqr.q[k * augmentedNx + i] =
+                -p.stateWeights[i] * p.stateReference[k * qp.nx + i];
         }
         for (int_t i = 0; i < qp.nu; ++i)
         {
-            lqr.R[k * qp.nu * qp.nu + i * qp.nu + i] = p.controlWeights[i] + 1.0e-9;
-            lqr.r[k * qp.nu + i] = -p.controlWeights[i] * p.controlReference[k * qp.nu + i];
+            const real_t differenceWeight = k == 0
+                || p.controlDifferenceWeights.empty()
+                ? 0.0 : p.controlDifferenceWeights[i];
+            lqr.Q[k * augmentedNx * augmentedNx
+                + (qp.nx + i) * augmentedNx + qp.nx + i] += differenceWeight;
+            lqr.R[k * qp.nu * qp.nu + i * qp.nu + i] =
+                p.controlWeights[i] + differenceWeight + 1.0e-9;
+            lqr.stateControl[k * augmentedNx * qp.nu
+                + (qp.nx + i) * qp.nu + i] = -differenceWeight;
+            lqr.r[k * qp.nu + i] =
+                -p.controlWeights[i] * p.controlReference[k * qp.nu + i];
         }
     }
     for (int_t i = 0; i < qp.nx; ++i)
     {
-        lqr.Qterminal[i * qp.nx + i] = p.terminalWeights[i];
-        lqr.qterminal[i] = -p.terminalWeights[i] * p.stateReference[qp.N * qp.nx + i];
+        lqr.Qterminal[i * augmentedNx + i] = p.terminalWeights[i];
+        lqr.qterminal[i] =
+            -p.terminalWeights[i] * p.stateReference[qp.N * qp.nx + i];
     }
-    std::vector<real_t> warm(qp.nV, 0.0);
-    if (!solveStageVaryingLqr(lqr, solution)) return warm;
+    warm.assign(qp.nV, 0.0);
+    if (!solveStageVaryingLqr(lqr, solution)) return false;
     for (int_t k = 0; k <= qp.N; ++k)
     {
-        std::copy(solution.states.begin() + k * qp.nx, solution.states.begin() + (k + 1) * qp.nx,
-                  warm.begin() + stateIndex(qp, k));
-        if (k < qp.N) std::copy(solution.controls.begin() + k * qp.nu,
-            solution.controls.begin() + (k + 1) * qp.nu, warm.begin() + controlIndex(qp, k));
+        std::copy(solution.states.begin() + k * augmentedNx,
+            solution.states.begin() + k * augmentedNx + qp.nx,
+            warm.begin() + stateIndex(qp, k));
+        if (k < qp.N)
+            std::copy(solution.controls.begin() + k * qp.nu,
+                solution.controls.begin() + (k + 1) * qp.nu,
+                warm.begin() + controlIndex(qp, k));
     }
-    return warm;
+    return true;
+}
+
+void initializeRestorationSlacks(
+    const AgentQp& qp,
+    std::vector<real_t>& warm)
+{
+    if (qp.slackVariableCount <= 0) return;
+    for (int_t variable = qp.trajectoryVariableCount;
+         variable < qp.nV; ++variable)
+        warm[variable] = 0.0;
+    for (int_t row = 0; row < qp.nC; ++row)
+    {
+        real_t value = 0.0;
+        for (int_t variable = 0;
+             variable < qp.trajectoryVariableCount; ++variable)
+            value += qp.A[row * qp.nV + variable] * warm[variable];
+        if (qp.lbA[row] > -0.5 * INFTY && value < qp.lbA[row])
+            for (int_t variable = qp.trajectoryVariableCount;
+                 variable < qp.nV; ++variable)
+            {
+                const real_t coefficient = qp.A[row * qp.nV + variable];
+                if (coefficient > 0.0)
+                    warm[variable] = std::max(
+                        warm[variable], (qp.lbA[row] - value) / coefficient);
+            }
+        if (qp.ubA[row] < 0.5 * INFTY && value > qp.ubA[row])
+            for (int_t variable = qp.trajectoryVariableCount;
+                 variable < qp.nV; ++variable)
+            {
+                const real_t coefficient = qp.A[row * qp.nV + variable];
+                if (coefficient < 0.0)
+                    warm[variable] = std::max(
+                        warm[variable], (value - qp.ubA[row]) / -coefficient);
+            }
+    }
 }
 
 bool solveLocalQp(const NonlinearAgentProblem& p, int_t outer, int_t admm,
@@ -1536,6 +1761,8 @@ bool solveLocalQp(const NonlinearAgentProblem& p, int_t outer, int_t admm,
     SQProblem*& solver, AgentQp& qp, NonlinearTurboStatistics& stats)
 {
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    enum SolvePath { COLD_START, MATRIX_HOTSTART, VECTOR_HOTSTART };
+    SolvePath solvePath = COLD_START;
     if (options.continuationMode == NCONT_COLD && solver != 0)
     {
         delete solver;
@@ -1543,35 +1770,72 @@ bool solveLocalQp(const NonlinearAgentProblem& p, int_t outer, int_t admm,
     }
     int_t nWSR = options.maxWorkingSetRecalculations;
     returnValue status; ++stats.qpSolves;
+    bool usedRiccatiWarmStart = false;
+    initializeRestorationSlacks(qp, qp.solution);
     if (!solver)
     {
         solver = new SQProblem(qp.nV, qp.nC); configureSolver(*solver, reliableQp);
         if (options.useRiccatiWarmStart)
         {
-            const std::vector<real_t> warm = riccatiWarmStart(p, qp);
-            status = solver->init(&qp.H[0], &qp.g[0], &qp.A[0], &qp.lb[0], &qp.ub[0],
-                &qp.lbA[0], &qp.ubA[0], nWSR, 0, &warm[0]);
+            std::vector<real_t> warm;
+            const std::chrono::steady_clock::time_point riccatiStart =
+                std::chrono::steady_clock::now();
+            const bool warmStartAvailable = riccatiWarmStart(p, qp, warm);
+            stats.riccatiTimeMilliseconds += static_cast<real_t>(
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - riccatiStart).count());
+            if (warmStartAvailable)
+            {
+                initializeRestorationSlacks(qp, warm);
+                usedRiccatiWarmStart = true;
+                ++stats.riccatiInitializations;
+                status = solver->init(&qp.H[0], &qp.g[0], &qp.A[0],
+                    &qp.lb[0], &qp.ub[0], &qp.lbA[0], &qp.ubA[0],
+                    nWSR, 0, &warm[0]);
+            }
+            else
+            {
+                ++stats.riccatiFailures;
+                status = solver->init(&qp.H[0], &qp.g[0], &qp.A[0],
+                    &qp.lb[0], &qp.ub[0], &qp.lbA[0], &qp.ubA[0],
+                    nWSR, 0, &qp.solution[0]);
+            }
         }
         else
             status = solver->init(&qp.H[0], &qp.g[0], &qp.A[0], &qp.lb[0], &qp.ub[0],
                 &qp.lbA[0], &qp.ubA[0], nWSR);
+        if (status != SUCCESSFUL_RETURN && usedRiccatiWarmStart)
+        {
+            ++stats.riccatiFailures;
+            delete solver;
+            solver = new SQProblem(qp.nV, qp.nC);
+            configureSolver(*solver, reliableQp);
+            nWSR = options.maxWorkingSetRecalculations;
+            status = solver->init(&qp.H[0], &qp.g[0], &qp.A[0],
+                &qp.lb[0], &qp.ub[0], &qp.lbA[0], &qp.ubA[0],
+                nWSR, 0, &qp.solution[0]);
+            ++stats.coldStarts;
+        }
         ++stats.coldStarts;
     }
     else if (hessianChanged
         || (admm == 0 && options.continuationMode >= NCONT_QP))
     {
+        solvePath = MATRIX_HOTSTART;
         status = solver->hotstart(&qp.H[0], &qp.g[0], &qp.A[0], &qp.lb[0], &qp.ub[0],
             &qp.lbA[0], &qp.ubA[0], nWSR); ++stats.matrixHotstarts;
     }
     else
     {
+        solvePath = VECTOR_HOTSTART;
         status = solver->hotstart(&qp.g[0], &qp.lb[0], &qp.ub[0], &qp.lbA[0], &qp.ubA[0], nWSR);
         ++stats.vectorHotstarts;
     }
     stats.qpWorkingSetRecalculations += nWSR;
     stats.backendIterations += nWSR;
-    if (status != SUCCESSFUL_RETURN && (admm == 0 || hessianChanged))
+    if (status != SUCCESSFUL_RETURN && solvePath != COLD_START)
     {
+        ++stats.hotstartFallbacks;
         delete solver; solver = new SQProblem(qp.nV, qp.nC);
         configureSolver(*solver, reliableQp);
         nWSR = options.maxWorkingSetRecalculations;
@@ -1592,6 +1856,12 @@ bool solveLocalQp(const NonlinearAgentProblem& p, int_t outer, int_t admm,
     );
     stats.localQpSolveTimeMilliseconds +=
         static_cast<real_t>(elapsed.count());
+    if (solvePath == COLD_START)
+        stats.coldStartQpTimeMilliseconds += static_cast<real_t>(elapsed.count());
+    else if (solvePath == MATRIX_HOTSTART)
+        stats.matrixHotstartQpTimeMilliseconds += static_cast<real_t>(elapsed.count());
+    else
+        stats.vectorHotstartQpTimeMilliseconds += static_cast<real_t>(elapsed.count());
     stats.lastQpStatus = static_cast<int_t>(status);
     return success;
 }
@@ -1605,6 +1875,9 @@ void accumulateQpStatistics(
     total.backendIterations += local.backendIterations;
     total.lastQpStatus = local.lastQpStatus;
     total.coldStarts += local.coldStarts;
+    total.riccatiInitializations += local.riccatiInitializations;
+    total.riccatiFailures += local.riccatiFailures;
+    total.hotstartFallbacks += local.hotstartFallbacks;
     total.matrixHotstarts += local.matrixHotstarts;
     total.vectorHotstarts += local.vectorHotstarts;
     total.maximumLocalQpSolveTimeMilliseconds = std::max(
@@ -1613,6 +1886,12 @@ void accumulateQpStatistics(
     );
     total.localQpSolveTimeMilliseconds +=
         local.localQpSolveTimeMilliseconds;
+    total.riccatiTimeMilliseconds += local.riccatiTimeMilliseconds;
+    total.coldStartQpTimeMilliseconds += local.coldStartQpTimeMilliseconds;
+    total.matrixHotstartQpTimeMilliseconds +=
+        local.matrixHotstartQpTimeMilliseconds;
+    total.vectorHotstartQpTimeMilliseconds +=
+        local.vectorHotstartQpTimeMilliseconds;
 }
 
 bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t outer,
@@ -1621,7 +1900,24 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
     std::vector<AgentQp>& qps, NonlinearTurboStatistics& stats)
 {
     if (outer > 0 && options.continuationMode <= NCONT_INNER_ADMM) pool.reset();
-    if (pool.solvers.empty()) pool.solvers.assign(agents.size(), static_cast<SQProblem*>(0));
+    if (pool.solvers.empty())
+    {
+        pool.solvers.assign(agents.size(), static_cast<SQProblem*>(0));
+        pool.variableCounts.assign(agents.size(), -1);
+        pool.constraintCounts.assign(agents.size(), -1);
+    }
+    for (std::size_t agent = 0; agent < agents.size(); ++agent)
+    {
+        if (pool.solvers[agent] != 0
+            && (pool.variableCounts[agent] != qps[agent].nV
+                || pool.constraintCounts[agent] != qps[agent].nC))
+        {
+            delete pool.solvers[agent];
+            pool.solvers[agent] = 0;
+        }
+        pool.variableCounts[agent] = qps[agent].nV;
+        pool.constraintCounts[agent] = qps[agent].nC;
+    }
     std::vector<std::vector<std::size_t> > incidentPairs(agents.size());
     for (std::size_t p = 0; p < pairs.size(); ++p)
     {
@@ -1639,6 +1935,8 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
             stats.maximumLocalQpVariables, qps[a].nV);
         stats.maximumLocalQpConstraints = std::max(
             stats.maximumLocalQpConstraints, qps[a].nC);
+        stats.maximumCorridorRowsPerAgent = std::max(
+            stats.maximumCorridorRowsPerAgent, qps[a].corridorRows);
     }
 
     real_t rho = options.rho;
@@ -1679,6 +1977,8 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
             / static_cast<real_t>(options.inexactAdmmScpIterations);
     bool admmConverged = false;
     bool hessianChanged = false;
+    int_t pendingRhoDirection = 0;
+    int_t pendingRhoConfirmations = 0;
     for (int_t iteration = 0; iteration < options.maxAdmmIterations; ++iteration)
     {
         std::fill(solved.begin(), solved.end(), 0);
@@ -1802,10 +2102,22 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
                     primalSquared += e1 * e1 + e2 * e2;
                     dualSquared += rho * rho
                         * (c1 * c1 + c2 * c2);
-                    positionSquared += pair.firstPosition[x] * pair.firstPosition[x]
-                        + pair.secondPosition[x] * pair.secondPosition[x];
-                    auxiliarySquared += pair.firstAuxiliary[x] * pair.firstAuxiliary[x]
-                        + pair.secondAuxiliary[x] * pair.secondAuxiliary[x];
+                    const real_t positionMidpoint = 0.5
+                        * (pair.firstPosition[x] + pair.secondPosition[x]);
+                    const real_t auxiliaryMidpoint = 0.5
+                        * (pair.firstAuxiliary[x] + pair.secondAuxiliary[x]);
+                    const real_t centeredFirstPosition =
+                        pair.firstPosition[x] - positionMidpoint;
+                    const real_t centeredSecondPosition =
+                        pair.secondPosition[x] - positionMidpoint;
+                    const real_t centeredFirstAuxiliary =
+                        pair.firstAuxiliary[x] - auxiliaryMidpoint;
+                    const real_t centeredSecondAuxiliary =
+                        pair.secondAuxiliary[x] - auxiliaryMidpoint;
+                    positionSquared += centeredFirstPosition * centeredFirstPosition
+                        + centeredSecondPosition * centeredSecondPosition;
+                    auxiliarySquared += centeredFirstAuxiliary * centeredFirstAuxiliary
+                        + centeredSecondAuxiliary * centeredSecondAuxiliary;
                     scaledDualSquared += rho * rho
                         * (pair.firstDual[x] * pair.firstDual[x]
                             + pair.secondDual[x] * pair.secondDual[x]);
@@ -1840,13 +2152,36 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
             && (iteration + 1) % options.adaptiveRhoInterval == 0
             && iteration + 1 < options.maxAdmmIterations)
         {
-            real_t updatedRho = rho;
-            if (primal > options.adaptiveRhoImbalance * dualResidual
+            const real_t normalizedPrimal = primal
+                / std::max(primalThreshold, static_cast<real_t>(1.0e-16));
+            const real_t normalizedDual = dualResidual
+                / std::max(dualThreshold, static_cast<real_t>(1.0e-16));
+            int_t rhoDirection = 0;
+            if (normalizedPrimal
+                    > options.adaptiveRhoImbalance * normalizedDual
                 && primal > primalThreshold)
+                rhoDirection = 1;
+            else if (normalizedDual
+                    > options.adaptiveRhoImbalance * normalizedPrimal
+                && dualResidual > dualThreshold)
+                rhoDirection = -1;
+            if (rhoDirection == 0)
+            {
+                pendingRhoDirection = 0;
+                pendingRhoConfirmations = 0;
+            }
+            else if (rhoDirection == pendingRhoDirection)
+                ++pendingRhoConfirmations;
+            else
+            {
+                pendingRhoDirection = rhoDirection;
+                pendingRhoConfirmations = 1;
+            }
+            real_t updatedRho = rho;
+            if (pendingRhoConfirmations >= 2 && rhoDirection > 0)
                 updatedRho = std::min(options.maximumRho,
                     rho * options.adaptiveRhoScale);
-            else if (dualResidual > options.adaptiveRhoImbalance * primal
-                && dualResidual > dualThreshold)
+            else if (pendingRhoConfirmations >= 2 && rhoDirection < 0)
                 updatedRho = std::max(options.minimumRho,
                     rho / options.adaptiveRhoScale);
             if (std::fabs(updatedRho - rho) > 1.0e-12 * rho)
@@ -1860,6 +2195,8 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
                         pairs[p].secondDual[i] *= dualScale;
                 }
                 rho = updatedRho;
+                pendingRhoDirection = 0;
+                pendingRhoConfirmations = 0;
                 stats.minimumAdmmRho = std::min(stats.minimumAdmmRho, rho);
                 stats.maximumAdmmRho = std::max(stats.maximumAdmmRho, rho);
                 ++stats.rhoUpdates;
@@ -2144,6 +2481,14 @@ bool solveCentralized(const std::vector<PairData>& pairs, int_t outer,
         }
     }
 
+    if (context.solver != 0
+        && (context.g.size() != static_cast<std::size_t>(nV)
+            || context.lbA.size() != static_cast<std::size_t>(nC)))
+    {
+        delete context.solver;
+        context.solver = 0;
+    }
+
     if (options.coordinationMethod == NCM_CENTRALIZED_OSQP)
     {
 #ifdef QPOASES_WITH_OSQP
@@ -2314,11 +2659,9 @@ real_t minimumPairwiseClearance(
             agents[first], firstCircle, options);
         const CollisionCircle secondGeometry = collisionCircleForAgent(
             agents[second], secondCircle, options);
-        const real_t requiredDistance =
-            agents[first].collisionCircles.empty()
-            && agents[second].collisionCircles.empty()
-            ? pairSafetyDistance(agents[first], agents[second], options)
-            : firstGeometry.radius + secondGeometry.radius;
+        const real_t requiredDistance = firstGeometry.radius
+            + secondGeometry.radius + endpointFeasiblePairBuffer(
+                agents[first], firstCircle, agents[second], secondCircle, options);
         std::vector<real_t> pf(np, 0.0), ps(np, 0.0);
         for (int_t k = 0; k < agents[first].horizon; ++k)
         for (int_t sample = 0;
@@ -2527,11 +2870,9 @@ bool validateEndpointGeometry(
                 firstAgent, firstCircle, options);
             const CollisionCircle secondGeometry = collisionCircleForAgent(
                 secondAgent, secondCircle, options);
-            const real_t requiredDistance =
-                firstAgent.collisionCircles.empty()
-                && secondAgent.collisionCircles.empty()
-                ? pairSafetyDistance(firstAgent, secondAgent, options)
-                : firstGeometry.radius + secondGeometry.radius;
+            const real_t requiredDistance = firstGeometry.radius
+                + secondGeometry.radius + endpointFeasiblePairBuffer(
+                    firstAgent, firstCircle, secondAgent, secondCircle, options);
             const real_t margin = std::sqrt(squaredDistance)
                 - requiredDistance;
             if (margin < -options.collisionTolerance)
@@ -2709,11 +3050,36 @@ real_t maximumTerminalViolation(
 {
     real_t maximum = 0.0;
     for (std::size_t a = 0; a < agents.size(); ++a)
+    {
+        const real_t tolerance = terminalToleranceForAgent(
+            agents[a], options);
         maximum = std::max(maximum,
             terminalPositionError(agents[a], states[a])
-                - terminalToleranceForAgent(agents[a], options));
+                - tolerance);
+        if (!agents[a].enforceTerminalState) continue;
+        const int_t nx = agents[a].model->stateDimension();
+        const int_t terminal = agents[a].horizon * nx;
+        for (int_t state = 0; state < nx; ++state)
+        {
+            if (!agents[a].terminalStateConstraintMask.empty()
+                && !agents[a].terminalStateConstraintMask[state])
+                continue;
+            maximum = std::max(
+                maximum,
+                std::fabs(
+                    states[a][terminal + state]
+                    - agents[a].stateReference[terminal + state]
+                ) - tolerance
+            );
+        }
+    }
     return std::max(0.0, maximum);
 }
+
+real_t dynamicsDefect(const std::vector<NonlinearAgentProblem>& agents,
+    const std::vector<std::vector<real_t> >& states,
+    const std::vector<std::vector<real_t> >& controls);
+
 real_t merit(const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
     const std::vector<std::vector<real_t> >& controls,
@@ -2727,11 +3093,15 @@ real_t merit(const std::vector<NonlinearAgentProblem>& agents,
     );
     const real_t terminalViolation = maximumTerminalViolation(
         agents, states, options);
+    const real_t dynamicsViolation = std::max(
+        0.0, dynamicsDefect(agents, states, controls)
+            - options.dynamicsTolerance);
     return trajectoryCost(agents, states, controls)
         + options.meritPenalty
             * (pairViolation * pairViolation
                 + obstacleViolation * obstacleViolation
-                + terminalViolation * terminalViolation);
+                + terminalViolation * terminalViolation
+                + dynamicsViolation * dynamicsViolation);
 }
 
 real_t dynamicsDefect(const std::vector<NonlinearAgentProblem>& agents,
@@ -2779,13 +3149,15 @@ NonlinearTurboOptions::NonlinearTurboOptions()
       adaptiveRhoScale(2.0), minimumRho(1.0), maximumRho(1000.0),
       inexactAdmmScpIterations(0), inexactAdmmToleranceMultiplier(1.0),
       polishingAdmmIterations(200),
-      safetyDistance(1.0), obstacleSafetyDistance(0.5), controlTrustRegion(1.0),
+      safetyDistance(1.0), pairSafetyBuffer(0.0),
+      obstacleSafetyDistance(0.5), controlTrustRegion(1.0),
       maxRestorationAttempts(2), restorationTrustRegionShrink(0.5),
       minimumControlTrustRegion(0.1), restorationSlackPenalty(1.0e4),
       restorationSlackTolerance(1.0e-6),
       admmPrimalTolerance(1.0e-3), admmDualTolerance(1.0e-3),
       admmRelativeTolerance(1.0e-3), admmRelaxation(1.0),
-      scpStepTolerance(1.0e-3), collisionTolerance(1.0e-2),
+      scpStepTolerance(1.0e-3), dynamicsTolerance(1.0e-7),
+      collisionTolerance(1.0e-2),
       terminalPositionTolerance(2.0), meritPenalty(1.0e5),
       pairActivationDistance(-1.0), obstacleActivationDistance(-1.0),
       continuationMinimumNormalDot(0.5) {}
@@ -2793,15 +3165,18 @@ NonlinearTurboOptions::NonlinearTurboOptions()
 NonlinearTurboStatistics::NonlinearTurboStatistics()
     : scpIterations(0), admmIterations(0), qpSolves(0),
       qpWorkingSetRecalculations(0), backendIterations(0), lastQpStatus(0),
-      failedAgent(-1), coldStarts(0),
+      failedAgent(-1), coldStarts(0), riccatiInitializations(0),
+      riccatiFailures(0), hotstartFallbacks(0),
       matrixHotstarts(0), vectorHotstarts(0), transportedPairStages(0),
       resetPairStages(0), parallelQpBatches(0), parallelAgentThreads(1),
       rhoUpdates(0), restorationAttempts(0), successfulRestorations(0),
-      polishingScpIterations(0), admmConvergedSubproblems(0),
+      lineSearchRecoveryAttempts(0), polishingScpIterations(0),
+      admmConvergedSubproblems(0),
       admmIterationLimitSubproblems(0), maximumActivePairs(0),
       initialActivePairs(0), finalActivePairs(0), maximumPotentialPairs(0),
       maximumAgentDegree(0), maximumActiveObstaclesPerAgent(0),
-      maximumPotentialObstaclesPerAgent(0), maximumLocalQpVariables(0),
+      maximumPotentialObstaclesPerAgent(0), maximumCorridorRowsPerAgent(0),
+      maximumLocalQpVariables(0),
       maximumLocalQpConstraints(0), centralizedQpVariables(0),
       centralizedQpConstraints(0), primalResidual(0.0), dualResidual(0.0),
       minimumAdmmRho(INFTY), maximumAdmmRho(0.0), finalAdmmRho(0.0),
@@ -2812,6 +3187,9 @@ NonlinearTurboStatistics::NonlinearTurboStatistics()
       maximumDynamicsDefect(0.0), maximumTerminalPositionError(0.0),
       objective(0.0), solveTimeMilliseconds(0.0),
       maximumLocalQpSolveTimeMilliseconds(0.0),
+      riccatiTimeMilliseconds(0.0), coldStartQpTimeMilliseconds(0.0),
+      matrixHotstartQpTimeMilliseconds(0.0),
+      vectorHotstartQpTimeMilliseconds(0.0),
       qpBuildTimeMilliseconds(0.0), pairBuildTimeMilliseconds(0.0),
       admmAssemblyTimeMilliseconds(0.0), localQpBatchTimeMilliseconds(0.0),
       localQpSolveTimeMilliseconds(0.0), consensusTimeMilliseconds(0.0),
@@ -2820,13 +3198,14 @@ NonlinearTurboStatistics::NonlinearTurboStatistics()
 NonlinearScpIterationStatistics::NonlinearScpIterationStatistics()
     : iteration(0), admmIterations(0), rhoUpdates(0), restorationAttempts(0),
       qpStatus(0), failedAgent(-1), qpSolved(false), admmConverged(false),
-      restorationUsed(false), polishing(false), stepAccepted(false),
+      restorationUsed(false), lineSearchRecovery(false), polishing(false),
+      stepAccepted(false),
       objective(0.0), merit(0.0),
       primalResidual(0.0), dualResidual(0.0), rho(0.0),
       controlTrustRegion(0.0), maximumRestorationSlack(0.0),
-      stepLength(0.0), maximumControlStep(0.0),
+      stepLength(0.0), maximumControlStep(0.0), maximumQpControlStep(0.0),
       minimumPairwiseClearance(INFTY), minimumObstacleClearance(INFTY),
-      maximumTerminalPositionError(0.0) {}
+      maximumDynamicsDefect(0.0), maximumTerminalPositionError(0.0) {}
 
 NonlinearTurboResult::NonlinearTurboResult() : success(false), converged(false) {}
 
@@ -2880,15 +3259,19 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         || options.inexactAdmmToleranceMultiplier < 1.0
         || options.polishingAdmmIterations < options.maxAdmmIterations
         || !std::isfinite(options.safetyDistance)
+        || !std::isfinite(options.pairSafetyBuffer)
         || !std::isfinite(options.pairActivationDistance)
         || options.pairActivationDistance < -1.0
         || !std::isfinite(options.obstacleActivationDistance)
         || options.obstacleActivationDistance < -1.0
         || options.safetyDistance < 0.0
+        || options.pairSafetyBuffer < 0.0
         || !std::isfinite(options.obstacleSafetyDistance)
         || options.obstacleSafetyDistance < 0.0
         || !std::isfinite(options.collisionTolerance)
         || options.collisionTolerance < 0.0
+        || !std::isfinite(options.dynamicsTolerance)
+        || options.dynamicsTolerance < 0.0
         || !std::isfinite(options.terminalPositionTolerance)
         || options.terminalPositionTolerance < 0.0
         || options.collisionSamplesPerInterval <= 0
@@ -2926,22 +3309,45 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         nominalControls[a] = agents[a].initialControls.empty()
             ? agents[a].controlReference : agents[a].initialControls;
         clampControls(agents[a], nominalControls[a]);
-        rollout(agents[a], nominalControls[a], nominalStates[a]);
+        if (agents[a].initialStates.empty())
+            rollout(agents[a], nominalControls[a], nominalStates[a]);
+        else
+        {
+            nominalStates[a] = agents[a].initialStates;
+            std::copy(
+                agents[a].initialState.begin(),
+                agents[a].initialState.end(),
+                nominalStates[a].begin());
+        }
     }
     const std::vector<std::vector<real_t> > homotopyStates =
         nominalStates;
 
+    std::vector<int> fullSpaceGlobalization(agents.size(), 0);
+    for (std::size_t a = 0; a < agents.size(); ++a)
+        fullSpaceGlobalization[a] =
+            agents[a].initialStates.empty() ? 0 : 1;
+
     std::vector<AgentQp> activeQps;
     std::vector<PairData> previousPairs;
-    SolverPool distributedSolvers; CentralContext centralContext;
+    SolverPool distributedSolvers;
+    SolverPool reliableDistributedSolvers;
+    SolverPool elasticDistributedSolvers;
+    CentralContext centralContext;
     bool qpFailed = false;
     bool polishing = false;
+    bool recoveringRejectedStep = false;
+    bool adaptiveRhoSafeguard = false;
+    int_t rejectedStepRecoveryAttempts = 0;
+    int_t slowProgressIterations = 0;
     const int_t positionDimension = worldPositionDimension(agents);
+    real_t currentTrustRegion = options.controlTrustRegion;
     for (int_t outer = 0; outer < options.maxScpIterations; ++outer)
     {
         NonlinearScpIterationStatistics trace;
         trace.iteration = outer + 1;
         trace.polishing = polishing;
+        trace.lineSearchRecovery = recoveringRejectedStep;
         if (polishing) ++result.statistics.polishingScpIterations;
         trace.controlTrustRegion = options.controlTrustRegion;
         trace.objective = trajectoryCost(agents, nominalStates, nominalControls);
@@ -2950,21 +3356,39 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         const int_t rhoUpdatesBefore = result.statistics.rhoUpdates;
         const int_t admmConvergedBefore = result.statistics.admmConvergedSubproblems;
         NonlinearTurboOptions iterationOptions = options;
+        if (adaptiveRhoSafeguard)
+            iterationOptions.adaptiveRho = false;
         if (polishing)
         {
             iterationOptions.adaptiveRho = false;
-            iterationOptions.rho = options.minimumRho;
+            iterationOptions.rho = options.rho;
             iterationOptions.inexactAdmmScpIterations = 0;
             iterationOptions.admmDualTolerance = options.admmPrimalTolerance;
             iterationOptions.admmRelativeTolerance = 0.0;
             iterationOptions.maxAdmmIterations = options.polishingAdmmIterations;
         }
+        if (recoveringRejectedStep)
+        {
+            iterationOptions.adaptiveRho = false;
+            iterationOptions.rho = options.rho;
+            iterationOptions.inexactAdmmScpIterations = 0;
+            const real_t recoveryTolerance = std::max(
+                1.0e-12,
+                std::min(options.admmPrimalTolerance,
+                    0.1 * options.collisionTolerance));
+            iterationOptions.admmPrimalTolerance = recoveryTolerance;
+            iterationOptions.admmDualTolerance = recoveryTolerance;
+            iterationOptions.admmRelativeTolerance = 0.0;
+            iterationOptions.maxAdmmIterations = std::max(
+                options.maxAdmmIterations, options.polishingAdmmIterations);
+        }
         std::vector<AgentQp> qps;
         std::vector<PairData> pairs;
         bool solved = false;
         bool restorationUsed = false;
-        real_t attemptTrustRegion = options.controlTrustRegion;
-        for (int_t attempt = 0; attempt <= options.maxRestorationAttempts; ++attempt)
+        real_t attemptTrustRegion = currentTrustRegion;
+        for (int_t attempt = 0;
+             attempt <= options.maxRestorationAttempts; ++attempt)
         {
             const bool restorationAttempt = attempt > 0;
             const bool elasticConstraints = attempt > 1;
@@ -2973,13 +3397,8 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 restorationUsed = true;
                 ++trace.restorationAttempts;
                 ++result.statistics.restorationAttempts;
-                if (elasticConstraints)
-                    attemptTrustRegion = std::max(
-                        options.minimumControlTrustRegion,
-                        attemptTrustRegion * options.restorationTrustRegionShrink
-                    );
-                distributedSolvers.reset();
-                centralContext.reset();
+                if (options.coordinationMethod != NCM_DISTRIBUTED_ADMM)
+                    centralContext.reset();
             }
 
             const std::chrono::steady_clock::time_point qpBuildStart =
@@ -3045,15 +3464,23 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             NonlinearTurboOptions solveOptions = iterationOptions;
             if (restorationAttempt)
             {
-                solveOptions.adaptiveRho = false;
                 solveOptions.inexactAdmmScpIterations = 0;
+                solveOptions.maxAdmmIterations = std::max(
+                    options.maxAdmmIterations, options.polishingAdmmIterations);
             }
+            SolverPool* attemptSolvers = &distributedSolvers;
+            if (elasticConstraints)
+                attemptSolvers = &elasticDistributedSolvers;
+            else if (restorationAttempt)
+                attemptSolvers = &reliableDistributedSolvers;
             solved = options.coordinationMethod == NCM_DISTRIBUTED_ADMM
                 ? solveDistributed(
-                    agents, outer, solveOptions, restorationAttempt,
-                    distributedSolvers, pairs, qps, result.statistics)
+                    agents, outer, solveOptions,
+                    restorationAttempt || recoveringRejectedStep,
+                    *attemptSolvers, pairs, qps, result.statistics)
                 : solveCentralized(
-                    pairs, outer, solveOptions, restorationAttempt,
+                    pairs, outer, solveOptions,
+                    restorationAttempt || recoveringRejectedStep,
                     centralContext, qps, result.statistics);
             if (solved)
             {
@@ -3093,19 +3520,20 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 + geometryDiagnostic(agents, nominalStates, obstacles, options);
             break;
         }
-        if (restorationUsed)
-        {
-            distributedSolvers.reset();
-            centralContext.reset();
-        }
         if (options.coordinationMethod == NCM_DISTRIBUTED_ADMM
             && options.continuationMode == NCONT_FULL) previousPairs = pairs;
         const std::chrono::steady_clock::time_point globalizationStart =
             std::chrono::steady_clock::now();
 
+        std::vector<std::vector<real_t> > qpStates(agents.size());
         std::vector<std::vector<real_t> > qpControls(agents.size());
         for (std::size_t a = 0; a < agents.size(); ++a)
         {
+            qpStates[a].assign((qps[a].N + 1) * qps[a].nx, 0.0);
+            for (int_t k = 0; k <= qps[a].N; ++k)
+                std::copy(qps[a].solution.begin() + stateIndex(qps[a], k),
+                    qps[a].solution.begin() + stateIndex(qps[a], k) + qps[a].nx,
+                    qpStates[a].begin() + k * qps[a].nx);
             qpControls[a].assign(qps[a].N * qps[a].nu, 0.0);
             for (int_t k = 0; k < qps[a].N; ++k)
                 std::copy(qps[a].solution.begin() + controlIndex(qps[a], k),
@@ -3131,12 +3559,20 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             std::vector<std::vector<real_t> > candidateStates(agents.size());
             for (std::size_t a = 0; a < agents.size(); ++a)
             {
+                if (fullSpaceGlobalization[a])
+                {
+                    candidateStates[a].resize(nominalStates[a].size());
+                    for (std::size_t i = 0; i < candidateStates[a].size(); ++i)
+                        candidateStates[a][i] = nominalStates[a][i]
+                            + alpha * (qpStates[a][i] - nominalStates[a][i]);
+                }
                 candidateControls[a].resize(nominalControls[a].size());
                 for (std::size_t i = 0; i < candidateControls[a].size(); ++i)
                     candidateControls[a][i] = nominalControls[a][i]
                         + alpha * (qpControls[a][i] - nominalControls[a][i]);
                 clampControls(agents[a], candidateControls[a]);
-                rollout(agents[a], candidateControls[a], candidateStates[a]);
+                if (!fullSpaceGlobalization[a])
+                    rollout(agents[a], candidateControls[a], candidateStates[a]);
             }
             const real_t candidateMerit = merit(
                 agents,
@@ -3153,12 +3589,97 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             }
             alpha *= 0.5;
         }
+        // A full-state warm start can keep making tiny merit improvements while
+        // retaining a nonlinear dynamics defect.  Let the exact rollout compete
+        // with every accepted full-space step, not only with a rejected step.
+        // A filter step may also enter the exact-dynamics manifold with a
+        // recoverable terminal error when that rollout already satisfies the
+        // physical collision constraints.
+        {
+            bool hasFullStateWarmStart = false;
+            std::vector<std::vector<real_t> > projectedStates = bestStates;
+            for (std::size_t a = 0; a < agents.size(); ++a)
+                if (fullSpaceGlobalization[a])
+                {
+                    hasFullStateWarmStart = true;
+                    rollout(agents[a], bestControls[a], projectedStates[a]);
+                }
+            if (hasFullStateWarmStart)
+            {
+                const real_t currentDynamicsDefect = dynamicsDefect(
+                    agents, bestStates, bestControls);
+                const real_t projectedDynamicsDefect = dynamicsDefect(
+                    agents, projectedStates, bestControls);
+                const real_t projectionMerit = merit(
+                    agents, projectedStates, bestControls, obstacles, options);
+                int_t maximumHorizon = 0;
+                for (std::size_t a = 0; a < agents.size(); ++a)
+                    maximumHorizon = std::max(maximumHorizon, agents[a].horizon);
+                const real_t accumulatedDefectBound = std::sqrt(
+                    static_cast<real_t>(worldPositionDimension(agents)))
+                    * maximumHorizon * currentDynamicsDefect;
+                const bool safeDynamicsRestoration =
+                    currentDynamicsDefect > options.dynamicsTolerance
+                    && projectedDynamicsDefect <= options.dynamicsTolerance
+                    && minimumPairwiseClearance(
+                        agents, projectedStates, options)
+                        >= -options.collisionTolerance
+                    && minimumObstacleClearance(
+                        agents, projectedStates, obstacles, options)
+                        >= -options.collisionTolerance
+                    && maximumTerminalViolation(
+                        agents, projectedStates, options)
+                        <= maximumTerminalViolation(
+                            agents, bestStates, options)
+                            + accumulatedDefectBound;
+                if (projectionMerit < bestMerit - 1.0e-10
+                    || safeDynamicsRestoration)
+                {
+                    bestMerit = projectionMerit;
+                    bestAlpha = 1.0;
+                    bestStates.swap(projectedStates);
+                    for (std::size_t a = 0; a < agents.size(); ++a)
+                        fullSpaceGlobalization[a] = 0;
+                }
+            }
+        }
         real_t maximumStep = 0.0;
+        real_t maximumQpStep = 0.0;
+        for (std::size_t a = 0; a < agents.size(); ++a)
+            for (std::size_t i = 0; i < nominalControls[a].size(); ++i)
+                maximumQpStep = std::max(maximumQpStep,
+                    std::fabs(qpControls[a][i] - nominalControls[a][i]));
+        if (bestAlpha <= 0.0)
+        {
+            currentTrustRegion = std::max(
+                options.minimumControlTrustRegion,
+                attemptTrustRegion * options.restorationTrustRegionShrink
+            );
+            distributedSolvers.reset();
+            reliableDistributedSolvers.reset();
+            elasticDistributedSolvers.reset();
+            centralContext.reset();
+            previousPairs.clear();
+        }
+        else if (bestAlpha >= 1.0 - 1.0e-12)
+        {
+            currentTrustRegion = std::min(
+                options.controlTrustRegion,
+                attemptTrustRegion / options.restorationTrustRegionShrink
+            );
+        }
         for (std::size_t a = 0; a < agents.size(); ++a)
             for (std::size_t i = 0; i < nominalControls[a].size(); ++i)
                 maximumStep = std::max(maximumStep, std::fabs(bestControls[a][i] - nominalControls[a][i]));
         const real_t relativeMeritDecrease = (initialMerit - bestMerit)
             / std::max(1.0, std::fabs(initialMerit));
+        if (bestAlpha > 0.0)
+        {
+            if (relativeMeritDecrease <= options.scpStepTolerance)
+                ++slowProgressIterations;
+            else
+                slowProgressIterations = 0;
+        }
 
         result.statistics.globalizationTimeMilliseconds += static_cast<real_t>(
             std::chrono::duration<double, std::milli>(
@@ -3177,20 +3698,55 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         trace.stepAccepted = bestAlpha > 0.0;
         trace.stepLength = bestAlpha;
         trace.maximumControlStep = maximumStep;
+        trace.maximumQpControlStep = maximumQpStep;
         trace.objective = trajectoryCost(agents, nominalStates, nominalControls);
         trace.merit = bestMerit;
         trace.minimumPairwiseClearance = pairwiseClearance;
         trace.minimumObstacleClearance = obstacleClearance;
+        trace.maximumDynamicsDefect = dynamicsDefect(
+            agents, nominalStates, nominalControls);
         trace.maximumTerminalPositionError = maximumTerminalPositionError(
             agents, nominalStates);
-        result.scpTrace.push_back(trace);
+        const bool rejectedStepStationary = bestAlpha <= 0.0
+            && recoveringRejectedStep && polishing && trace.admmConverged
+            && (maximumQpStep <= options.scpStepTolerance
+                || slowProgressIterations >= 3);
+        const bool sustainedStrictStagnation = bestAlpha > 0.0
+            && polishing && trace.admmConverged
+            && slowProgressIterations >= 3;
         const bool nonlinearConverged =
-            (maximumStep <= options.scpStepTolerance || bestAlpha <= 0.0
-                || relativeMeritDecrease <= options.scpStepTolerance)
+            ((bestAlpha > 0.0
+                && maximumStep <= options.scpStepTolerance
+                && maximumQpStep <= options.scpStepTolerance)
+                || rejectedStepStationary || sustainedStrictStagnation)
             && pairwiseClearance >= -options.collisionTolerance
             && obstacleClearance >= -options.collisionTolerance
             && terminalFeasible
+            && dynamicsDefect(agents, nominalStates, nominalControls)
+                <= options.dynamicsTolerance
             && trace.maximumRestorationSlack <= options.restorationSlackTolerance;
+        if (bestAlpha <= 0.0 && !rejectedStepStationary)
+        {
+            if (rejectedStepRecoveryAttempts < options.maxRestorationAttempts)
+            {
+                ++rejectedStepRecoveryAttempts;
+                ++result.statistics.lineSearchRecoveryAttempts;
+                recoveringRejectedStep = true;
+                adaptiveRhoSafeguard = true;
+                result.scpTrace.push_back(trace);
+                continue;
+            }
+            result.scpTrace.push_back(trace);
+            result.status = "line-search recovery exhausted with a nonstationary QP step: "
+                + geometryDiagnostic(agents, nominalStates, obstacles, options);
+            break;
+        }
+        if (bestAlpha > 0.0)
+        {
+            recoveringRejectedStep = false;
+            rejectedStepRecoveryAttempts = 0;
+        }
+        result.scpTrace.push_back(trace);
         if (nonlinearConverged)
         {
             if (options.coordinationMethod == NCM_DISTRIBUTED_ADMM && !polishing)
@@ -3204,6 +3760,16 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 break;
             }
         }
+        else if (options.coordinationMethod == NCM_DISTRIBUTED_ADMM
+            && !polishing
+            && bestAlpha > 0.0
+            && relativeMeritDecrease <= options.scpStepTolerance)
+        {
+            polishing = true;
+            continue;
+        }
+        else if (polishing && bestAlpha > 0.0)
+            polishing = false;
     }
 
     result.trajectories.resize(agents.size());
@@ -3235,7 +3801,8 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
     result.statistics.objective = trajectoryCost(agents, nominalStates, nominalControls);
     result.success = !qpFailed && result.statistics.minimumPairwiseClearance >= -options.collisionTolerance
         && result.statistics.minimumObstacleClearance >= -options.collisionTolerance
-        && maximumTerminalViolation(agents, nominalStates, options) <= 0.0;
+        && maximumTerminalViolation(agents, nominalStates, options) <= 0.0
+        && result.statistics.maximumDynamicsDefect <= options.dynamicsTolerance;
     if (result.status.empty())
         result.status = result.converged ? "converged" : (result.success
             ? "maximum SCP iterations reached with a feasible trajectory"

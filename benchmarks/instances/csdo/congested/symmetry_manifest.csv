@@ -1,0 +1,7 @@
+variant,instance,agents,mode
+base,packed_passing_bay_base.yaml,5,recovery
+mirror_x,packed_passing_bay_mirror_x.yaml,5,recovery
+mirror_y,packed_passing_bay_mirror_y.yaml,5,recovery
+rotate_180,packed_passing_bay_rotate_180.yaml,5,recovery
+priority_reverse,packed_passing_bay_priority_reverse.yaml,5,recovery
+priority_interleaved,packed_passing_bay_priority_interleaved.yaml,5,recovery

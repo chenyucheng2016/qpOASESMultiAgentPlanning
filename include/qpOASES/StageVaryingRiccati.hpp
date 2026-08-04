@@ -17,6 +17,8 @@ struct StageVaryingLqrProblem
     std::vector<real_t> c;
     std::vector<real_t> Q;
     std::vector<real_t> R;
+    /** Optional state-control cross terms, one nx-by-nu matrix per stage. */
+    std::vector<real_t> stateControl;
     std::vector<real_t> q;
     std::vector<real_t> r;
     std::vector<real_t> Qterminal;

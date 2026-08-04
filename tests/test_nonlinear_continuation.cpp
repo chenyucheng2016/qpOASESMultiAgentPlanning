@@ -173,6 +173,39 @@ bool validatorDetectsCorruption(const std::vector<NonlinearAgentProblem>& agents
         && checked.maximumDynamicsDefect > validation.dynamicsTolerance;
 }
 
+bool validatorDetectsTerminalStateError(
+    const std::vector<NonlinearAgentProblem>& agents)
+{
+    const NonlinearTurboOptions options = makeOptions(NCONT_FULL, false);
+    const NonlinearTurboResult result = NonlinearTurboADMM().solve(
+        agents, options);
+    if (!validateResult(agents, options, result)) return false;
+
+    std::vector<NonlinearAgentProblem> constrained = agents;
+    const int_t nx = constrained[0].model->stateDimension();
+    const int_t terminal = constrained[0].horizon * nx;
+    constrained[0].enforceTerminalState = true;
+    constrained[0].terminalStateConstraintMask.assign(nx, false);
+    constrained[0].terminalStateConstraintMask[2] = true;
+    constrained[0].stateReference[terminal + 2] =
+        result.trajectories[0].states[terminal + 2];
+
+    NonlinearValidationOptions validation;
+    validation.terminalPositionTolerance = 2.0;
+    validation.terminalStateTolerance = 1.0e-3;
+    const NonlinearValidationResult valid = validateNonlinearTrajectories(
+        constrained, std::vector<ConvexPolygonObstacle>(),
+        result.trajectories, options, validation);
+    constrained[0].stateReference[terminal + 2] += 0.1;
+    const NonlinearValidationResult invalid = validateNonlinearTrajectories(
+        constrained, std::vector<ConvexPolygonObstacle>(),
+        result.trajectories, options, validation);
+    return valid.success
+        && !invalid.success
+        && invalid.status == "terminal state error exceeds tolerance"
+        && invalid.maximumTerminalStateError > 0.09;
+}
+
 }
 
 int main()
@@ -183,5 +216,6 @@ int main()
     agents.push_back(makeAgent(model, true));
     return modesHaveExpectedStateReuse(agents)
         && parallelMatchesSerial(agents)
-        && validatorDetectsCorruption(agents) ? 0 : 1;
+        && validatorDetectsCorruption(agents)
+        && validatorDetectsTerminalStateError(agents) ? 0 : 1;
 }

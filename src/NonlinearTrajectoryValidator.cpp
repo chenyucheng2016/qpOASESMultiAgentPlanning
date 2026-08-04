@@ -140,7 +140,9 @@ bool validInput(
         || !std::isfinite(options.dynamicsTolerance)
         || options.dynamicsTolerance < 0.0
         || !std::isfinite(options.terminalPositionTolerance)
-        || options.terminalPositionTolerance < 0.0)
+        || options.terminalPositionTolerance < 0.0
+        || !std::isfinite(options.terminalStateTolerance)
+        || options.terminalStateTolerance < 0.0)
     {
         error = "invalid validation options";
         return false;
@@ -160,7 +162,10 @@ bool validInput(
             || trajectories[a].controls.size()
                 != static_cast<std::size_t>(horizon * nu)
             || agents[a].stateReference.size()
-                != static_cast<std::size_t>((horizon + 1) * nx))
+                != static_cast<std::size_t>((horizon + 1) * nx)
+            || (!agents[a].terminalStateConstraintMask.empty()
+                && agents[a].terminalStateConstraintMask.size()
+                    != static_cast<std::size_t>(nx)))
         {
             error = "trajectory dimensions are inconsistent";
             return false;
@@ -213,12 +218,13 @@ bool validInput(
 
 NonlinearValidationOptions::NonlinearValidationOptions()
     : interpolationSubsteps(10), dynamicsTolerance(1.0e-8),
-      terminalPositionTolerance(2.0) {}
+      terminalPositionTolerance(2.0), terminalStateTolerance(1.0e-6) {}
 
 NonlinearValidationResult::NonlinearValidationResult()
     : success(false), minimumPairwiseClearance(INFTY),
       minimumObstacleClearance(INFTY), maximumDynamicsDefect(0.0),
-      maximumTerminalPositionError(0.0) {}
+      maximumTerminalPositionError(0.0),
+      maximumTerminalStateError(0.0) {}
 
 NonlinearValidationResult validateNonlinearTrajectories(
     const std::vector<NonlinearAgentProblem>& agents,
@@ -277,6 +283,22 @@ NonlinearValidationResult validateNonlinearTrajectories(
             result.maximumTerminalPositionError,
             std::sqrt(terminalSquared)
         );
+        if (agents[a].enforceTerminalState)
+        {
+            for (int_t state = 0; state < nx; ++state)
+            {
+                if (!agents[a].terminalStateConstraintMask.empty()
+                    && !agents[a].terminalStateConstraintMask[state])
+                    continue;
+                result.maximumTerminalStateError = std::max(
+                    result.maximumTerminalStateError,
+                    std::fabs(
+                        trajectories[a].states[horizon * nx + state]
+                        - agents[a].stateReference[horizon * nx + state]
+                    )
+                );
+            }
+        }
     }
 
     std::vector<std::vector<std::vector<real_t> > > start(agents.size());
@@ -362,6 +384,9 @@ NonlinearValidationResult validateNonlinearTrajectories(
     else if (result.maximumTerminalPositionError
         > validationOptions.terminalPositionTolerance)
         result.status = "terminal position error exceeds tolerance";
+    else if (result.maximumTerminalStateError
+        > validationOptions.terminalStateTolerance)
+        result.status = "terminal state error exceeds tolerance";
     else
     {
         result.success = true;

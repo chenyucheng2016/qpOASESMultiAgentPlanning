@@ -1,9 +1,107 @@
 # TurboADMM-NL development benchmark status
 
-This is development evidence collected on 2026-08-02. It is not the locked
+This is development evidence collected through 2026-08-03. It is not the locked
 30-seed final-paper experiment. The WSL build used GCC 9.4, OpenMP, and OSQP
-1.x from `/usr/local/lib/libosqp.so`. Every scenario-method process had the
-same 120 second wall-time cap.
+1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
+below used the same 120 second wall-time cap per scenario-method process.
+
+## Revision 6 terminal correctness and restoration hotstarts
+
+A fixed-warm-start permutation diagnostic now separates Turbo solver ordering
+from CSDO/PBS ordering. The successful `packed_within_flow_order00` guess and
+corridors were held byte-identical while the Turbo agent vector was permuted as
+`0-1-2-3-4`, `0-1-2-4-3`, and `1-0-2-3-4`. All three runs converged and
+validated. After mapping schedules by physical name, their maximum state
+difference was `6.38e-11` and their objective was `3.719340847186` to displayed
+precision. The prior within-flow sensitivity therefore originates in different
+PBS/Hybrid-A* warm starts and horizons, not Turbo's agent-vector ordering.
+
+The diagnostic also exposed a correctness bug: elastic restoration disabled
+the masked terminal-state equality, while solver convergence and the bridge
+validator checked terminal position only. One completed order-01 trajectory
+was incorrectly labeled valid with `0.0685` rad terminal-yaw error. Masked
+terminal bounds now remain active in every restoration formulation, nonlinear
+convergence includes masked state error, and the independent validator has a
+separate terminal-state tolerance. The CSDO bridge freezes both terminal
+position and terminal state tolerance at `1e-3`.
+
+The main order-01 runtime pathology was repeated destruction of qpOASES state:
+43 restoration attempts caused 353 cold starts and 450.56 s solver time.
+Normal, reliable-retry, and elastic QPs now retain separate solver pools, so
+each fixed formulation can use matrix/vector hotstarts across SCP iterations.
+With the same 66-stage warm start, corridors, two WSL threads, and tolerances,
+order-01 now converges and validates in 37.74 s with 4 restoration attempts,
+28 cold starts, 75 matrix hotstarts, 456 vector hotstarts, `3.52e-5` maximum
+terminal-state error, and zero final restoration slack. The order-00 control
+remains at 37.37 s and validates with `7.23e-5` maximum terminal-state error.
+
+The complete manual Turbo gate still passes 7/7 strict convergence and
+independent validation. Single-run WSL solver times are 0.659, 0.847, 3.318,
+13.678, 8.828, 50.068, and 67.010 s in scenario order. The six headline
+cases therefore pass; `medium_heterogeneous_open` remains regression-only.
+Objectives, minimum clearances, terminal-position errors, and zero final
+restoration slack match the revision-5 solutions.
+
+The deep-conflict `packed_within_flow_order04` case is not fixed. Its frozen
+warm start has `-0.375` m pairwise clearance. A completion diagnostic exits
+invalid after 281.03 s with 744 ADMM iterations, 0.279 dynamics defect,
+`-0.353` m pairwise clearance, `-0.245` m exact obstacle clearance, and
+maximum restoration slack 1.07. A direct rollout of the interpolated controls
+is not a viable initializer: it misses goals by 5.30 m and reaches `-3.80` m
+obstacle clearance. This row remains negative evidence; the CSDO publication
+gate is not yet satisfied.
+
+## Revision 5 restoration and CSDO milestone
+
+The canonical WSL policy is fixed rho 35 with exact early ADMM and a strict
+polishing phase. Rejected SCP directions now trigger a bounded restoration
+solve and trust-region contraction. Practical stationarity requires a
+converged strict ADMM solve plus three consecutive accepted relative-merit
+decreases below `1e-3`; feasibility tolerances are unchanged.
+
+Elastic obstacle slacks are shared by the collision samples in one time
+interval. This removes the dense-Hessian memory blow-up in `very_hard_maze`:
+the former process was killed at 15.48 GiB RSS, while the passing run peaks at
+279 MiB. A global 2 m obstacle working set is now used by every benchmark case,
+with the full obstacle set retained for nonlinear merit and independent
+validation.
+
+The final Release CTest run passes 13/13 in 257.86 seconds. All seven manual
+regressions strictly converge and validate; the six headline cases exclude
+`medium_heterogeneous_open`, which remains as an overhead-control regression.
+Single-run solver evidence from this gate is:
+
+| Scenario | n | m | Turbo time | Objective | Terminal error | Min pair / obstacle clearance |
+|---|---:|---:|---:|---:|---:|---:|
+| easy open | 2 | 0 | 0.537 s | 38.085 | 0.00061 m | -0.000003 / N/A m |
+| easy blocker | 2 | 1 | 0.633 s | 48.560 | 0.00246 m | 1.055 / 0.000007 m |
+| medium doorway | 4 | 2 | 3.041 s | 326.838 | 0.0528 m | 0.296 / -0.000206 m |
+| medium heterogeneous open (regression only) | 4 | 0 | 12.368 s | 133.766 | 0.00779 m | -0.000059 / N/A m |
+| hard heterogeneous doorway | 4 | 2 | 7.563 s | 357.889 | 0.2818 m | 1.416 / -0.000385 m |
+| hard warehouse | 8 | 8 | 45.429 s | 1380.119 | 0.3011 m | 0.544 / -0.000869 m |
+| very hard maze | 8 | 16 | 59.651 s | 1260.539 | 0.2618 m | 0.360 / -0.001434 m |
+
+The previously measured centralized-OSQP warehouse reference is objective
+1461.034 in 238.49 seconds, so the current Turbo solution is 5.54% lower in
+objective and 5.25x faster. This reference was not rerun in revision 5 and is
+not a statistical paper result.
+
+The CSDO option-3 bridge now has two distinct, instrumented comparisons. The
+strict backend ablation keeps CSDO's SQP loop and replaces only OSQP: on the
+five-agent empty pilot, OSQP takes 0.0210 s and Turbo qpOASES takes 1.1815 s;
+Riccati initializes all five agents and 14 matrix hotstarts are recorded. On
+the 25-obstacle ex0 pilot, both methods are inaccurate (status 2 versus 3), at
+0.0778 s and 3.4608 s. This ablation does not expose agent-level ADMM structure.
+
+The full-engine bridge gives both methods the same PBS/Hybrid-A* guess and CSDO
+corridors. Turbo validates on the empty pilot in 1.449 s, versus CSDO's 0.032 s
+optimizer. The obstacle bridge is still blocked: on ex1, original CSDO succeeds
+in 0.130 s with 0.111 m exact obstacle clearance, while Turbo stops after four
+SCP iterations in 163.79 s with an interpolated obstacle collision. Restoration
+now reaches ADMM and reports QP status, failed agent, slack, and recovery fields,
+but it does not yet project the dynamics-defective Hybrid-A* guess into the
+tight corridor efficiently. No runtime-advantage claim should be made from the
+CSDO comparison until this blocker is resolved on the frozen seed matrix.
 
 ## Revision 4 convergence-quality milestone
 

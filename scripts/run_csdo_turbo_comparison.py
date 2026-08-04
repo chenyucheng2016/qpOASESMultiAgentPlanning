@@ -24,6 +24,8 @@ def parse_args():
     parser.add_argument("--work-dir", required=True, type=pathlib.Path)
     parser.add_argument("--output-csv", required=True, type=pathlib.Path)
     parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument(
+        "--csdo-backend", choices=("osqp", "turbo_qpoases"), default="osqp")
     parser.add_argument("--timeout", type=float, default=7200.0)
     return parser.parse_args()
 
@@ -202,6 +204,7 @@ def main():
     stem = args.instance.stem
     csdo_output = args.work_dir / f"{stem}_csdo.yaml"
     guess_output = args.work_dir / f"{stem}_csdo_guesses.yaml"
+    corridor_output = args.work_dir / f"{stem}_csdo_corridors.yaml"
     turbo_output = args.work_dir / f"{stem}_turbo.yaml"
     csdo_log = args.work_dir / f"{stem}_csdo.log"
     turbo_log = args.work_dir / f"{stem}_turbo.log"
@@ -211,21 +214,25 @@ def main():
         "--input", str(args.instance.resolve()),
         "--output", str(csdo_output.resolve()),
         "--initial_guess",
+        "--corridor",
         "--screen", "0",
+        "--qp_backend", args.csdo_backend,
         "--timeLimit", str(args.timeout),
     ]
     csdo_code, csdo_wall, csdo_stdout = run(
         csdo_command, args.csdo_executable.parent, args.timeout + 30.0)
     csdo_log.write_text(csdo_stdout, encoding="utf-8")
-    if not csdo_output.exists() or not guess_output.exists():
+    if (not csdo_output.exists() or not guess_output.exists()
+            or not corridor_output.exists()):
         raise SystemExit(
-            f"CSDO did not produce output and warm start (code {csdo_code}); "
+            f"CSDO did not produce output, warm start, and corridors (code {csdo_code}); "
             f"see {csdo_log}")
 
     turbo_command = [
         str(args.turbo_executable),
         "--input", str(args.instance.resolve()),
         "--guess", str(guess_output.resolve()),
+        "--corridor", str(corridor_output.resolve()),
         "--output", str(turbo_output.resolve()),
         "--threads", str(args.threads),
     ]
@@ -261,6 +268,16 @@ def main():
         "csdo_optimizer_ideal_parallel_s":
             csdo_statistics["runtime_decentralized_optimization"],
         "csdo_solver_status": csdo_statistics["solver_status"],
+        "csdo_qp_backend": csdo_statistics.get("qp_backend", args.csdo_backend),
+        "csdo_qp_backend_time_s":
+            csdo_statistics.get("qp_backend_runtime", math.nan),
+        "csdo_qp_cold_starts": csdo_statistics.get("qp_cold_starts", 0),
+        "csdo_riccati_initializations":
+            csdo_statistics.get("riccati_initializations", 0),
+        "csdo_riccati_failures": csdo_statistics.get("riccati_failures", 0),
+        "csdo_matrix_hotstarts": csdo_statistics.get("matrix_hotstarts", 0),
+        "csdo_hotstart_fallbacks":
+            csdo_statistics.get("hotstart_fallbacks", 0),
         "csdo_objective": csdo_metrics["objective"],
         "csdo_min_pair_clearance": csdo_metrics["minimum_pairwise_clearance"],
         "csdo_min_obstacle_clearance":
@@ -287,6 +304,35 @@ def main():
         "turbo_terminal_yaw_error": turbo_metrics["maximum_terminal_yaw_error"],
         "turbo_scp_iterations": turbo_statistics["scp_iterations"],
         "turbo_admm_iterations": turbo_statistics["admm_iterations"],
+        "turbo_last_qp_status": turbo_statistics.get("last_qp_status", 0),
+        "turbo_failed_agent": turbo_statistics.get("failed_agent", -1),
+        "turbo_restoration_attempts":
+            turbo_statistics.get("restoration_attempts", 0),
+        "turbo_successful_restorations":
+            turbo_statistics.get("successful_restorations", 0),
+        "turbo_line_search_recovery_attempts":
+            turbo_statistics.get("line_search_recovery_attempts", 0),
+        "turbo_maximum_restoration_slack":
+            turbo_statistics.get("maximum_restoration_slack", 0.0),
+        "turbo_final_restoration_slack":
+            turbo_statistics.get("final_restoration_slack", 0.0),
+        "turbo_qp_variables": turbo_statistics["maximum_local_qp_variables"],
+        "turbo_qp_constraints": turbo_statistics["maximum_local_qp_constraints"],
+        "turbo_corridor_rows":
+            turbo_statistics["maximum_corridor_rows_per_agent"],
+        "turbo_cold_starts": turbo_statistics["cold_starts"],
+        "turbo_riccati_initializations":
+            turbo_statistics["riccati_initializations"],
+        "turbo_riccati_failures": turbo_statistics["riccati_failures"],
+        "turbo_hotstart_fallbacks": turbo_statistics["hotstart_fallbacks"],
+        "turbo_matrix_hotstarts": turbo_statistics["matrix_hotstarts"],
+        "turbo_vector_hotstarts": turbo_statistics["vector_hotstarts"],
+        "turbo_riccati_s": turbo_statistics["riccati_time"],
+        "turbo_cold_start_qp_s": turbo_statistics["cold_start_qp_time"],
+        "turbo_matrix_hotstart_qp_s":
+            turbo_statistics["matrix_hotstart_qp_time"],
+        "turbo_vector_hotstart_qp_s":
+            turbo_statistics["vector_hotstart_qp_time"],
         "turbo_threads": turbo_statistics["parallel_threads"],
     }
     append_row(args.output_csv, row)

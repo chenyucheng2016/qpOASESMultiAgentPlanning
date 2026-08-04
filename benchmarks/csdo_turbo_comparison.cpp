@@ -23,6 +23,7 @@ struct Arguments
 {
     std::string input;
     std::string guess;
+    std::string corridor;
     std::string output;
     int_t threads;
     Arguments() : threads(0) {}
@@ -47,6 +48,8 @@ Arguments parseArguments(int argc, char* argv[])
             arguments.input = argv[++index];
         else if ((option == "--guess" || option == "-g") && index + 1 < argc)
             arguments.guess = argv[++index];
+        else if ((option == "--corridor" || option == "-c") && index + 1 < argc)
+            arguments.corridor = argv[++index];
         else if ((option == "--output" || option == "-o") && index + 1 < argc)
             arguments.output = argv[++index];
         else if (option == "--threads" && index + 1 < argc)
@@ -55,10 +58,11 @@ Arguments parseArguments(int argc, char* argv[])
             throw std::runtime_error("unknown or incomplete argument: " + option);
     }
     if (arguments.input.empty() || arguments.guess.empty()
-        || arguments.output.empty())
+        || arguments.corridor.empty() || arguments.output.empty())
         throw std::runtime_error(
             "usage: csdo_turbo_comparison --input INSTANCE "
-            "--guess CSDO_GUESSES --output RESULT [--threads N]");
+            "--guess CSDO_GUESSES --corridor CSDO_CORRIDORS "
+            "--output RESULT [--threads N]");
     if (arguments.threads < 0)
         throw std::runtime_error("--threads must be nonnegative");
     return arguments;
@@ -150,6 +154,7 @@ std::vector<std::string> agentNames(const YAML::Node& input)
 std::vector<NonlinearAgentProblem> readAgents(
     const YAML::Node& input,
     const YAML::Node& guess,
+    const YAML::Node& corridors,
     const FrontSteeringModel& model)
 {
     const std::vector<std::string> names = agentNames(input);
@@ -165,8 +170,12 @@ std::vector<NonlinearAgentProblem> readAgents(
     for (std::size_t agent = 0; agent < names.size(); ++agent)
     {
         const YAML::Node nodes = schedule[names[agent]];
+        const YAML::Node corridorNodes = corridors[names[agent]];
         if (nodes.size() != stateCount)
             throw std::runtime_error("CSDO guesses require a common horizon");
+        if (!corridorNodes || corridorNodes.size() != 2 * stateCount)
+            throw std::runtime_error(
+                "CSDO corridors require front/rear boxes at every state");
         NonlinearAgentProblem& problem = agents[agent];
         problem.model = &model;
         problem.horizon = horizon;
@@ -192,6 +201,7 @@ std::vector<NonlinearAgentProblem> readAgents(
                     * csdoDegreeToRadian;
             }
         }
+        problem.initialStates = problem.stateReference;
         problem.initialState.assign(
             problem.stateReference.begin(),
             problem.stateReference.begin() + 4
@@ -216,6 +226,21 @@ std::vector<NonlinearAgentProblem> readAgents(
             CollisionCircle(1.25, 0.0, 1.25));
         problem.collisionCircles.push_back(
             CollisionCircle(-0.25, 0.0, 1.25));
+        problem.collisionCorridorLowerBounds.assign(stateCount * 4, 0.0);
+        problem.collisionCorridorUpperBounds.assign(stateCount * 4, 0.0);
+        for (std::size_t stage = 0; stage < stateCount; ++stage)
+        for (std::size_t circle = 0; circle < 2; ++circle)
+        {
+            const YAML::Node box = corridorNodes[2 * stage + circle];
+            if (!box.IsSequence() || box.size() != 6)
+                throw std::runtime_error(
+                    "CSDO corridor entries must contain nominal x/y and four bounds");
+            const std::size_t index = (stage * 2 + circle) * 2;
+            problem.collisionCorridorLowerBounds[index] = box[2].as<real_t>();
+            problem.collisionCorridorUpperBounds[index] = box[3].as<real_t>();
+            problem.collisionCorridorLowerBounds[index + 1] = box[4].as<real_t>();
+            problem.collisionCorridorUpperBounds[index + 1] = box[5].as<real_t>();
+        }
         problem.obstacleSafetyDistance = 0.0;
         problem.terminalPositionTolerance = 1.0e-3;
         problem.enforceTerminalState = true;
@@ -341,8 +366,78 @@ void writeResult(
         << validation.maximumDynamicsDefect;
     output << YAML::Key << "maximum_terminal_position_error" << YAML::Value
         << validation.maximumTerminalPositionError;
+    output << YAML::Key << "maximum_terminal_state_error" << YAML::Value
+        << validation.maximumTerminalStateError;
     output << YAML::Key << "parallel_threads" << YAML::Value
         << result.statistics.parallelAgentThreads;
+    output << YAML::Key << "qp_build_time" << YAML::Value
+        << result.statistics.qpBuildTimeMilliseconds / 1000.0;
+    output << YAML::Key << "pair_build_time" << YAML::Value
+        << result.statistics.pairBuildTimeMilliseconds / 1000.0;
+    output << YAML::Key << "admm_assembly_time" << YAML::Value
+        << result.statistics.admmAssemblyTimeMilliseconds / 1000.0;
+    output << YAML::Key << "local_qp_batch_time" << YAML::Value
+        << result.statistics.localQpBatchTimeMilliseconds / 1000.0;
+    output << YAML::Key << "local_qp_solve_time_sum" << YAML::Value
+        << result.statistics.localQpSolveTimeMilliseconds / 1000.0;
+    output << YAML::Key << "consensus_time" << YAML::Value
+        << result.statistics.consensusTimeMilliseconds / 1000.0;
+    output << YAML::Key << "globalization_time" << YAML::Value
+        << result.statistics.globalizationTimeMilliseconds / 1000.0;
+    output << YAML::Key << "qp_solves" << YAML::Value
+        << result.statistics.qpSolves;
+    output << YAML::Key << "backend_iterations" << YAML::Value
+        << result.statistics.backendIterations;
+    output << YAML::Key << "last_qp_status" << YAML::Value
+        << result.statistics.lastQpStatus;
+    output << YAML::Key << "failed_agent" << YAML::Value
+        << result.statistics.failedAgent;
+    output << YAML::Key << "restoration_attempts" << YAML::Value
+        << result.statistics.restorationAttempts;
+    output << YAML::Key << "successful_restorations" << YAML::Value
+        << result.statistics.successfulRestorations;
+    output << YAML::Key << "line_search_recovery_attempts" << YAML::Value
+        << result.statistics.lineSearchRecoveryAttempts;
+    output << YAML::Key << "maximum_restoration_slack" << YAML::Value
+        << result.statistics.maximumRestorationSlack;
+    output << YAML::Key << "final_restoration_slack" << YAML::Value
+        << result.statistics.finalRestorationSlack;
+    output << YAML::Key << "cold_starts" << YAML::Value
+        << result.statistics.coldStarts;
+    output << YAML::Key << "riccati_initializations" << YAML::Value
+        << result.statistics.riccatiInitializations;
+    output << YAML::Key << "riccati_failures" << YAML::Value
+        << result.statistics.riccatiFailures;
+    output << YAML::Key << "hotstart_fallbacks" << YAML::Value
+        << result.statistics.hotstartFallbacks;
+    output << YAML::Key << "matrix_hotstarts" << YAML::Value
+        << result.statistics.matrixHotstarts;
+    output << YAML::Key << "vector_hotstarts" << YAML::Value
+        << result.statistics.vectorHotstarts;
+    output << YAML::Key << "riccati_time" << YAML::Value
+        << result.statistics.riccatiTimeMilliseconds / 1000.0;
+    output << YAML::Key << "cold_start_qp_time" << YAML::Value
+        << result.statistics.coldStartQpTimeMilliseconds / 1000.0;
+    output << YAML::Key << "matrix_hotstart_qp_time" << YAML::Value
+        << result.statistics.matrixHotstartQpTimeMilliseconds / 1000.0;
+    output << YAML::Key << "vector_hotstart_qp_time" << YAML::Value
+        << result.statistics.vectorHotstartQpTimeMilliseconds / 1000.0;
+    output << YAML::Key << "maximum_active_pairs" << YAML::Value
+        << result.statistics.maximumActivePairs;
+    output << YAML::Key << "maximum_agent_degree" << YAML::Value
+        << result.statistics.maximumAgentDegree;
+    output << YAML::Key << "maximum_active_obstacles_per_agent" << YAML::Value
+        << result.statistics.maximumActiveObstaclesPerAgent;
+    output << YAML::Key << "maximum_corridor_rows_per_agent" << YAML::Value
+        << result.statistics.maximumCorridorRowsPerAgent;
+    output << YAML::Key << "maximum_local_qp_variables" << YAML::Value
+        << result.statistics.maximumLocalQpVariables;
+    output << YAML::Key << "maximum_local_qp_constraints" << YAML::Value
+        << result.statistics.maximumLocalQpConstraints;
+    output << YAML::Key << "primal_stopping_threshold" << YAML::Value
+        << result.statistics.primalStoppingThreshold;
+    output << YAML::Key << "dual_stopping_threshold" << YAML::Value
+        << result.statistics.dualStoppingThreshold;
     output << YAML::EndMap;
     output << YAML::Key << "schedule" << YAML::Value << YAML::BeginMap;
     for (std::size_t agent = 0;
@@ -392,38 +487,66 @@ int main(int argc, char* argv[])
         const Arguments arguments = parseArguments(argc, argv);
         const YAML::Node input = YAML::LoadFile(arguments.input);
         const YAML::Node guess = YAML::LoadFile(arguments.guess);
+        const YAML::Node corridors = YAML::LoadFile(arguments.corridor);
         std::vector<ConvexPolygonObstacle> obstacles;
         const CsdoGeometry geometry = readGeometry(input, obstacles);
         const real_t timeStep = 3.0 * 0.706 / 1.0 / 3.0 / 0.8;
         FrontSteeringModel model(timeStep, 1.0);
         const std::vector<NonlinearAgentProblem> agents =
-            readAgents(input, guess, model);
+            readAgents(input, guess, corridors, model);
 
         NonlinearTurboOptions options;
         options.coordinationMethod = NCM_DISTRIBUTED_ADMM;
         options.continuationMode = NCONT_FULL;
-        options.useRiccatiWarmStart = false;
+        options.useRiccatiWarmStart = true;
         options.parallelAgentSolves = true;
         options.parallelAgentThreads = arguments.threads;
-        options.collisionSamplesPerInterval = 1;
-        options.maxScpIterations = 20;
+        options.collisionSamplesPerInterval = 10;
+        options.maxScpIterations = 40;
         options.maxAdmmIterations = 100;
         options.polishingAdmmIterations = 300;
         options.adaptiveRho = true;
+        options.rho = 1.0;
+        options.minimumRho = 0.01;
+        options.maximumRho = 100.0;
+        options.admmRelaxation = 1.6;
+        options.adaptiveRhoImbalance = 5.0;
         options.controlTrustRegion = 2.0;
+        options.scpStepTolerance = 5.0e-3;
+        options.meritPenalty = 1.0e8;
+        options.pairSafetyBuffer = 5.0e-3;
         options.obstacleSafetyDistance = 0.0;
         options.pairActivationDistance = 2.0;
         options.obstacleActivationDistance = 2.0;
         options.collisionTolerance = 1.0e-3;
+        options.dynamicsTolerance = 1.0e-7;
         options.terminalPositionTolerance = 1.0e-3;
 
         NonlinearTurboADMM solver;
         const NonlinearTurboResult result =
             solver.solve(agents, obstacles, options);
+        for (std::size_t index = 0; index < result.scpTrace.size(); ++index)
+        {
+            const NonlinearScpIterationStatistics& trace =
+                result.scpTrace[index];
+            std::cout << "scp_trace iteration=" << trace.iteration
+                << " qp_status=" << trace.qpStatus
+                << " failed_agent=" << trace.failedAgent
+                << " restoration_attempts=" << trace.restorationAttempts
+                << " admm=" << trace.admmIterations
+                << " alpha=" << trace.stepLength
+                << " merit=" << trace.merit
+                << " dynamics=" << trace.maximumDynamicsDefect
+                << " obstacle=" << trace.minimumObstacleClearance
+                << " primal=" << trace.primalResidual
+                << " dual=" << trace.dualResidual
+                << " rho=" << trace.rho << "\n";
+        }
         NonlinearValidationOptions validationOptions;
         validationOptions.interpolationSubsteps = 10;
         validationOptions.dynamicsTolerance = 1.0e-7;
         validationOptions.terminalPositionTolerance = 1.0e-3;
+        validationOptions.terminalStateTolerance = 1.0e-3;
         NonlinearValidationResult validation;
         real_t objective = INFTY;
         real_t exactObstacleClearance = INFTY;

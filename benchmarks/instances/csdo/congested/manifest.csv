@@ -1,0 +1,7 @@
+family,agents,instance,mode
+convoy_passing_bay,3,convoy_passing_bay_n3.yaml,recovery
+convoy_passing_bay,4,convoy_passing_bay_n4.yaml,recovery
+convoy_passing_bay,5,convoy_passing_bay_n5.yaml,recovery
+packed_room_swap,4,packed_room_swap_n4.yaml,recovery
+packed_room_swap,6,packed_room_swap_n6.yaml,recovery
+packed_room_swap,8,packed_room_swap_n8.yaml,recovery

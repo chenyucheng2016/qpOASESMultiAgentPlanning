@@ -14,6 +14,7 @@ int main()
     p.A.assign(N * nx * nx, 0.0); p.B.assign(N * nx * nu, 0.0);
     p.c.assign(N * nx, 0.0); p.Q.assign(N * nx * nx, 0.0);
     p.R.assign(N, 0.0); p.q.assign(N * nx, 0.0); p.r.assign(N, 0.0);
+    p.stateControl.assign(N * nx * nu, 0.0);
     p.Qterminal.assign(nx * nx, 0.0); p.qterminal.assign(nx, 0.0);
     int_t k, i, j;
     for (k = 0; k < N; ++k)
@@ -23,6 +24,7 @@ int main()
         A[0] = 1.0; A[1] = 0.1 + 0.01 * k; A[3] = 1.0;
         B[0] = 0.005; B[1] = 0.1; p.c[k * nx] = 0.01 * k;
         Q[0] = 2.0; Q[3] = 0.3; p.R[k] = 0.2 + 0.01 * k;
+        p.stateControl[k * nx] = 0.02 + 0.005 * k;
         p.q[k * nx] = -0.4; p.r[k] = 0.03;
     }
     p.Qterminal[0] = 8.0; p.Qterminal[3] = 1.0; p.qterminal[0] = -1.2;
@@ -39,6 +41,7 @@ int main()
             defect = std::max(defect, std::fabs(predicted - next[i]));
         }
         real_t stationarity = p.R[k] * s.controls[k] + p.r[k];
+        stationarity += p.stateControl[k * nx] * x[0];
         for (i = 0; i < nx; ++i) stationarity += B[i] * s.costates[(k + 1) * nx + i];
         stationarityError = std::max(stationarityError, std::fabs(stationarity));
     }

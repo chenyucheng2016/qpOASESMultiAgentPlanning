@@ -32,14 +32,18 @@ remains much faster on medium doorway (`3.74` versus `28.67` seconds) and hard
 heterogeneous doorway (`9.26` versus `106.97` seconds). The two centralized
 OSQP large-scale rows remain failures.
 
-On the frozen 24-case passing-bay development family, Turbo improves from 14
-valid cases to 20. Outcomes are 11 shared successes, nine Turbo-only
-recoveries, zero CSDO-only cases, and four failures for both methods. Maximum
-valid terminal error is `0.910` mm; minimum pair and obstacle clearances are
-`0.664` mm and `50.0` mm; dynamics defect is numerical zero. The median Turbo
-wall time rises from `6.73` to `7.56` seconds. This passes the 80% Turbo
-validity gate, but recovery is `9/13 = 69.2%`, one case below the predeclared
-70% gate. These remain development results, not the locked final-paper claim.
+On the exact-commit rerun of the frozen 24-case passing-bay development family,
+Turbo improves from 14 valid cases to 20. Outcomes are 12 shared successes,
+eight Turbo-only recoveries, zero CSDO-only cases, and four failures for both
+methods. A preceding run of the same candidate reported 11 shared and nine
+Turbo-only cases because CSDO's maximum dynamics defect on
+`passing_bay_l99_om10_reverse` changed from `0.01269` to `0.00465` across the
+fixed `0.01` validator threshold; Turbo was valid in both runs. Maximum valid
+Turbo terminal error is `0.910` mm; minimum pair and obstacle clearances are
+`0.664` mm and `50.0` mm; dynamics defect is numerical zero. Median Turbo wall
+time rises from `6.73` to `7.61` seconds. This passes the 80% Turbo validity
+gate, but exact-commit recovery is `8/12 = 66.7%`, below the predeclared 70%
+gate. These remain development results, not the locked final-paper claim.
 
 ## Revision 8 manifest-locked deterministic pilot
 

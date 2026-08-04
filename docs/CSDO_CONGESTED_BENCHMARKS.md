@@ -117,23 +117,30 @@ in its `.git` file.
 
 ## Passing-bay development outcome
 
-The original frozen run and the terminal-restoration candidate report every
-one of the same 24 cases:
+The original frozen run, the terminal-restoration pilot, and the exact-commit
+rerun report every one of the same 24 cases:
 
-| Outcome | Original | Candidate |
-|---|---:|---:|
-| CSDO valid | 11 | 11 |
-| Turbo valid | 14 | 20 |
-| both valid | 9 | 11 |
-| Turbo only | 5 | 9 |
-| CSDO only | 2 | 0 |
-| neither valid | 8 | 4 |
+| Outcome | Original | Candidate pilot | Exact `81c070a` |
+|---|---:|---:|---:|
+| CSDO valid | 11 | 11 | 12 |
+| Turbo valid | 14 | 20 | 20 |
+| both valid | 9 | 11 | 12 |
+| Turbo only | 5 | 9 | 8 |
+| CSDO only | 2 | 0 | 0 |
+| neither valid | 8 | 4 | 4 |
 
-The candidate validates on `83.3%` of cases and repairs `9/13 = 69.2%` of
-CSDO-invalid cases. Every valid Turbo trajectory has at most `0.910` mm
-terminal error, at least `0.664` mm pair clearance, at least `50.0` mm obstacle
-clearance, and numerical-zero dynamics defect. Median Turbo wall time changes
-from `6.73` to `7.56` seconds; runtime remains a disclosed secondary metric.
+The exact-commit candidate validates on `83.3%` of cases and repairs
+`8/12 = 66.7%` of CSDO-invalid cases. The only outcome difference from the
+preceding candidate pilot is `passing_bay_l99_om10_reverse`: CSDO's maximum
+dynamics defect changed from `0.01269` to `0.00465` across the fixed `0.01`
+threshold; Turbo remained valid. The exact result is reported instead of
+selecting the more favorable repeat.
+
+Every valid Turbo trajectory has at most `0.910` mm terminal error, at least
+`0.664` mm pair clearance, at least `50.0` mm obstacle clearance, and
+numerical-zero dynamics defect. Median Turbo wall time changes from `6.73` to
+`7.61` seconds; runtime remains a disclosed secondary metric. Exact artifacts
+are under `build-ral-wsl/results/csdo_ral/development_passing_bay_81c070a`.
 
 All four remaining failures use the 7.2 m bay. Its exported fixed CSDO
 corridors never give both footprint discs simultaneous lateral bay freedom, so

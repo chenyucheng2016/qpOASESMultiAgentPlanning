@@ -5,6 +5,42 @@ This is development evidence collected through 2026-08-04. It is not the locked
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
 
+## Revision 9 terminal-restoration globalization and CSDO sweep
+
+The candidate shrinks the control trust region after a heavily damped step
+only when pair and obstacle constraints are already feasible and terminal or
+dynamics restoration remains. The global merit and collision acceptance rules
+are unchanged, preserving the established collision-repair behavior. The CSDO
+adapter uses a 1 mm pair buffer, a 12-step line search, and a 0.01 minimum
+control trust region with the unchanged independent validator.
+
+All 13 WSL tests pass (`387.04` seconds in the recorded single run). The six
+headline deterministic cases also strictly converge and validate in a fresh
+one-repetition run:
+
+| Scenario | Candidate time (s) | Revision 8 time (s) | OSQP objective gap |
+|---|---:|---:|---:|
+| easy open | 0.727 | 0.571 | 0.013% |
+| easy blocker | 0.980 | 0.573 | -0.026% |
+| medium doorway | 3.740 | 3.585 | 0.494% |
+| hard heterogeneous doorway | 9.259 | 8.351 | 2.319% |
+| hard warehouse | 55.094 | 47.357 | OSQP failed |
+| very hard maze | 71.166 | 61.525 | OSQP failed |
+
+The four overlapping OSQP objective gaps remain at most `2.319%`. Turbo
+remains much faster on medium doorway (`3.74` versus `28.67` seconds) and hard
+heterogeneous doorway (`9.26` versus `106.97` seconds). The two centralized
+OSQP large-scale rows remain failures.
+
+On the frozen 24-case passing-bay development family, Turbo improves from 14
+valid cases to 20. Outcomes are 11 shared successes, nine Turbo-only
+recoveries, zero CSDO-only cases, and four failures for both methods. Maximum
+valid terminal error is `0.910` mm; minimum pair and obstacle clearances are
+`0.664` mm and `50.0` mm; dynamics defect is numerical zero. The median Turbo
+wall time rises from `6.73` to `7.56` seconds. This passes the 80% Turbo
+validity gate, but recovery is `9/13 = 69.2%`, one case below the predeclared
+70% gate. These remain development results, not the locked final-paper claim.
+
 ## Revision 8 manifest-locked deterministic pilot
 
 The frozen `ral-deterministic-v1-pilot` protocol records commit `faa8c18`, the

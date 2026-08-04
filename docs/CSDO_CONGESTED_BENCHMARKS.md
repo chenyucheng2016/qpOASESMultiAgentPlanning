@@ -115,6 +115,31 @@ unchanged manifest and binaries. A Windows-linked worktree must pass the commit
 as the second argument because Linux Git cannot resolve the Windows path stored
 in its `.git` file.
 
+## Passing-bay development outcome
+
+The original frozen run and the terminal-restoration candidate report every
+one of the same 24 cases:
+
+| Outcome | Original | Candidate |
+|---|---:|---:|
+| CSDO valid | 11 | 11 |
+| Turbo valid | 14 | 20 |
+| both valid | 9 | 11 |
+| Turbo only | 5 | 9 |
+| CSDO only | 2 | 0 |
+| neither valid | 8 | 4 |
+
+The candidate validates on `83.3%` of cases and repairs `9/13 = 69.2%` of
+CSDO-invalid cases. Every valid Turbo trajectory has at most `0.910` mm
+terminal error, at least `0.664` mm pair clearance, at least `50.0` mm obstacle
+clearance, and numerical-zero dynamics defect. Median Turbo wall time changes
+from `6.73` to `7.56` seconds; runtime remains a disclosed secondary metric.
+
+All four remaining failures use the 7.2 m bay. Its exported fixed CSDO
+corridors never give both footprint discs simultaneous lateral bay freedom, so
+the common convex subproblem cannot represent a passing maneuver. The cases
+remain in the table rather than being removed or given expanded corridors.
+
 ## Publication gate
 
 The CSDO comparison becomes paper-facing only when all of the following hold:

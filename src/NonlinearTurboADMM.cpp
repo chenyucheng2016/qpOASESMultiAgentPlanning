@@ -3677,6 +3677,23 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             centralContext.reset();
             previousPairs.clear();
         }
+        // A heavily damped terminal/dynamics restoration step signals a poor
+        // local model. Keep the established trust policy for collision repair,
+        // where shrinking here can lock the iterate into a colliding homotopy.
+        else if (bestAlpha < 0.25
+            && minimumPairwiseClearance(agents, bestStates, options)
+                >= -options.collisionTolerance
+            && minimumObstacleClearance(
+                agents, bestStates, obstacles, options)
+                >= -options.collisionTolerance
+            && (maximumTerminalViolation(agents, bestStates, options) > 0.0
+                || dynamicsDefect(agents, bestStates, bestControls)
+                    > options.dynamicsTolerance))
+        {
+            currentTrustRegion = std::max(
+                options.minimumControlTrustRegion,
+                attemptTrustRegion * options.restorationTrustRegionShrink);
+        }
         else if (bestAlpha >= 1.0 - 1.0e-12)
         {
             currentTrustRegion = std::min(

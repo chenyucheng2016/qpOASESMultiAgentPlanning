@@ -512,9 +512,13 @@ int main(int argc, char* argv[])
         options.admmRelaxation = 1.6;
         options.adaptiveRhoImbalance = 5.0;
         options.controlTrustRegion = 2.0;
+        // Match the strict terminal validator without retaining the former
+        // 5 mm pair-buffer conservatism in the shared CSDO geometry.
+        options.maxLineSearchSteps = 12;
+        options.minimumControlTrustRegion = 1.0e-2;
         options.scpStepTolerance = 5.0e-3;
         options.meritPenalty = 1.0e8;
-        options.pairSafetyBuffer = 5.0e-3;
+        options.pairSafetyBuffer = 1.0e-3;
         options.obstacleSafetyDistance = 0.0;
         options.pairActivationDistance = 2.0;
         options.obstacleActivationDistance = 2.0;

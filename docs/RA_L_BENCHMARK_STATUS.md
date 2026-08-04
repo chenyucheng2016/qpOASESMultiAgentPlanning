@@ -52,8 +52,35 @@ worse (`0.891` versus `0.334`).
 The result is manifest-locked to commit `133dec2`, schedule seed `20260804`, a
 120-second per-attempt cap, and Turbo executable SHA-256
 `14e246c033c0087505ddf5fdca80f3927c16583d182f28f2a0e3821e8038c035`. The
-three-stage window was selected on this development family; a disjoint frozen
-evaluation family is still required before making the final-paper claim.
+three-stage window was selected on this development family; the disjoint
+evaluation below tests the frozen policy without further tuning.
+
+## CSDO passing-bay evaluation
+
+The predeclared 32-case evaluation passes all four gates. Turbo validates
+30/32 cases (`93.75%`) versus CSDO's 15/32 (`46.88%`), a `46.88` percentage-
+point advantage. Among 17 cases where the common PBS/root fails, Turbo validates
+15 (`88.24%`) and CSDO validates none. Paired outcomes are 15 shared, 15
+Turbo-only, zero CSDO-only, and two neither-valid.
+
+Every valid Turbo output passes the unchanged validator: maximum terminal error
+is `0.946` mm, minimum pair and exact-obstacle clearances are `0.872` mm and
+`50.17` mm, and dynamics defect is numerical zero. The two failures are the
+10.2 m / `+1.5` m cases under both priorities; both remain obstacle-invalid by
+`41.29` mm. The fallback is invoked for only these cases and recovers neither,
+so all 30 successes come from the primary solver.
+
+On the 15 shared successes, Turbo lowers the arrival sum in nine and ties six
+with a median `3.03%` reduction, and shortens paths in ten with a median
+`0.655%` reduction. Its median smoothness objective remains worse (`0.989`
+versus `0.295`). Median wall time is `8.58` seconds for Turbo versus `0.099`
+seconds for CSDO, so runtime is not claimed as an advantage.
+
+The result is locked to exact commit
+`b81785388be4d3eafcb480a4c7cbf06e8c8fd6de`, seed `20260805`, executable
+SHA-256 `14e246c033c0087505ddf5fdca80f3927c16583d182f28f2a0e3821e8038c035`, and
+manifest SHA-256
+`7db22f99dc0fd4cf5c3af17d32a7d9914614331b87e9b32e68756ea138f1792f`.
 
 ## Revision 8 manifest-locked deterministic pilot
 

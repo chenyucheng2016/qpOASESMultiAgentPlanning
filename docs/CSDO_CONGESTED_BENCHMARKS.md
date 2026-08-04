@@ -24,6 +24,7 @@ summarizer. It writes one result per case, records status incrementally, and
 rebuilds the aggregate CSV deterministically. Resume refuses any hash or
 configuration mismatch. These cases are for method development; a separate
 evaluation family must be frozen before the final paper claim is measured.
+
 ## Frozen passing-bay evaluation protocol
 
 Before observing outcomes, evaluation v1 freezes all 32 combinations of bay
@@ -49,6 +50,51 @@ The predeclared paper-facing gates are:
 
 The family is frozen in `evaluation_manifest.csv` and has not been run when
 these gates are committed.
+
+### Evaluation v1 outcome
+
+The authoritative run is manifest-locked to exact commit
+`b81785388be4d3eafcb480a4c7cbf06e8c8fd6de`, schedule seed `20260805`, Turbo
+executable SHA-256
+`14e246c033c0087505ddf5fdca80f3927c16583d182f28f2a0e3821e8038c035`, and
+case-manifest SHA-256
+`7db22f99dc0fd4cf5c3af17d32a7d9914614331b87e9b32e68756ea138f1792f`.
+
+| Predeclared gate | Required | Observed | Result |
+|---|---:|---:|---|
+| Turbo validity | at least 90% | 30/32 = 93.75% | pass |
+| PBS-failure recovery | at least 80% | 15/17 = 88.24% | pass |
+| Success-rate advantage | at least 20 points | 46.88 points | pass |
+| Strict validation | every success | 30/30 | pass |
+
+The paired outcomes are 15 shared successes, 15 Turbo-only successes, zero
+CSDO-only cases, and two failures for both methods. CSDO validates on 15/32
+cases; it validates on none of the 17 common-root PBS-failure cases.
+
+Across the 30 valid Turbo outputs, maximum terminal error is `0.946` mm,
+minimum pair clearance is `0.872` mm, minimum exact-obstacle clearance is
+`50.17` mm, and dynamics defect is numerical zero. The two failures are the
+10.2 m bay with `+1.5` m arrival offset under both priorities; their returned
+trajectories remain obstacle-invalid by `41.29` mm.
+
+The temporal fallback is invoked only for those two primary failures and does
+not recover either. Thus all 30 evaluation successes come from the original
+fixed-corridor primary solver. This is evidence for conflicted-root joint
+repair, but
+not evidence that the development fallback is universally effective.
+
+Median total Turbo wall time is `8.58` seconds versus CSDO's `0.099` seconds;
+runtime remains a disclosed non-advantage. On the 15 shared successes, Turbo
+has a lower arrival sum in nine cases and ties six (median `3.03%` reduction),
+and has a shorter path in ten cases (median `0.655%` reduction). Its median
+smoothness objective is worse (`0.989` versus `0.295`).
+
+A preceding identical-file run carried an incorrect expanded commit suffix and
+is not used for the claim. It produced the same 30 Turbo successes, but CSDO's
+dynamics defect on `passing_bay_l102_om05_reverse` changed from `0.01230` to
+`0.00734` across the fixed `0.01` threshold. The exact-commit rerun is reported
+rather than selecting the more favorable competitor outcome. Exact artifacts
+are under `build-ral-wsl/results/csdo_ral/evaluation_passing_bay_b817853`.
 
 
 ## Frozen families

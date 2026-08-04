@@ -535,9 +535,12 @@ int main(int argc, char* argv[])
                 << " restoration_attempts=" << trace.restorationAttempts
                 << " admm=" << trace.admmIterations
                 << " alpha=" << trace.stepLength
+                << " trust=" << trace.controlTrustRegion
                 << " merit=" << trace.merit
                 << " dynamics=" << trace.maximumDynamicsDefect
                 << " obstacle=" << trace.minimumObstacleClearance
+                << " pair=" << trace.minimumPairwiseClearance
+                << " terminal=" << trace.maximumTerminalPositionError
                 << " primal=" << trace.primalResidual
                 << " dual=" << trace.dualResidual
                 << " rho=" << trace.rho << "\n";

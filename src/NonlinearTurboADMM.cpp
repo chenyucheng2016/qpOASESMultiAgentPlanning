@@ -3356,6 +3356,22 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         const int_t rhoUpdatesBefore = result.statistics.rhoUpdates;
         const int_t admmConvergedBefore = result.statistics.admmConvergedSubproblems;
         NonlinearTurboOptions iterationOptions = options;
+        // Preserve the fast inexact path early in SCP.  Tighten consensus only
+        // when pairwise clearance is the sole remaining feasibility defect.
+        const int_t pairRepairIteration = std::max<int_t>(
+            3, options.maxScpIterations / 2);
+        const real_t nominalPairwiseClearance = minimumPairwiseClearance(
+            agents, nominalStates, options);
+        const bool finalPairRepair =
+            options.coordinationMethod == NCM_DISTRIBUTED_ADMM
+            && outer + 1 >= pairRepairIteration
+            && dynamicsDefect(agents, nominalStates, nominalControls)
+                <= options.dynamicsTolerance
+            && maximumTerminalViolation(agents, nominalStates, options) <= 0.0
+            && minimumObstacleClearance(
+                agents, nominalStates, obstacles, options)
+                >= -options.collisionTolerance
+            && nominalPairwiseClearance < -options.collisionTolerance;
         if (adaptiveRhoSafeguard)
             iterationOptions.adaptiveRho = false;
         if (polishing)
@@ -3367,7 +3383,7 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             iterationOptions.admmRelativeTolerance = 0.0;
             iterationOptions.maxAdmmIterations = options.polishingAdmmIterations;
         }
-        if (recoveringRejectedStep)
+        if (recoveringRejectedStep || finalPairRepair)
         {
             iterationOptions.adaptiveRho = false;
             iterationOptions.rho = options.rho;

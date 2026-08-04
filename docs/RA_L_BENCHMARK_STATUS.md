@@ -5,6 +5,27 @@ This is development evidence collected through 2026-08-03. It is not the locked
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
 
+## Revision 7 delayed pair-feasibility polishing
+
+Strict consensus polishing is now enabled only in the final half of SCP when
+dynamics, terminal constraints, and static-obstacle constraints are already
+feasible and pairwise clearance is the sole remaining defect. This preserves
+the fast inexact path early in SCP and avoids scenario-specific parameter
+exceptions.
+
+The previously invalid `packed_within_flow_order04` development gate now
+returns an independently valid trajectory with zero pairwise clearance,
+`1.03e-7` m obstacle clearance, `1.42e-14` dynamics defect, and `1.26e-4`
+terminal-state error. It takes 370.45 s, 31 SCP iterations, and 1,286 ADMM
+iterations with two WSL threads. The trajectory is valid, but strict solver
+convergence remains false because the line-search recovery budget is exhausted
+after feasibility has been reached.
+
+The order00 and order01 controls remain strictly converged and valid at 35.80 s
+and 36.05 s, respectively. The new phase therefore repairs the deep-conflict
+case without slowing the two existing successful controls in their retained
+single-run measurements.
+
 ## Revision 6 terminal correctness and restoration hotstarts
 
 A fixed-warm-start permutation diagnostic now separates Turbo solver ordering

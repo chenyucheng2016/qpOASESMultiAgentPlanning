@@ -60,11 +60,14 @@ The exporter horizons range from 66 to 81 stages. More packed maps should not
 be promoted to paper benchmarks until this permutation/initializer sensitivity
 is fixed.
 
-A targeted `joint_repair` rerun of order04 now reaches exact dynamics
-(`1.42e-14`), terminal error `7.09e-6` m, and positive obstacle clearance in
-267.84 s. It remains invalid because pair clearance is `-0.00433` m after the
-40-SCP cap. This is retained as an explicit development failure rather than a
-paper-facing success.
+A delayed pair-feasibility polishing phase now recovers the targeted order04
+`joint_repair` case. With two WSL threads it returns an independently valid
+trajectory in 370.45 s: pair clearance is zero, obstacle clearance is
+`1.03e-7` m, dynamics defect is `1.42e-14`, and terminal-state error is
+`1.26e-4`. The run uses 31 SCP and 1,286 ADMM iterations. The solver does not
+claim strict convergence because the final line-search recovery exhausts its
+budget after feasibility is reached. This is positive recovery evidence, but
+not yet a paper-facing strict-convergence result.
 
 ## Existing recovery control
 

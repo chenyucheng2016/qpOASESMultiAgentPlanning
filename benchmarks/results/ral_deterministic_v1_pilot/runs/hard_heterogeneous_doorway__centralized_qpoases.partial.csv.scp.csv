@@ -1,0 +1,2 @@
+case_id,method,iteration,qp_solved,qp_status,failed_agent,restoration_attempts,maximum_restoration_slack,admm_converged,restoration_used,line_search_recovery,polishing,step_accepted,admm_iterations,rho_updates,objective,merit,primal_residual,dual_residual,rho,control_trust_region,step_length,maximum_control_step,maximum_qp_control_step,minimum_pairwise_clearance,minimum_obstacle_clearance,maximum_terminal_error
+hard_heterogeneous_doorway,centralized_qpoases,1,0,64,-1,2,0,1,1,0,0,0,0,0,1576.62419514,1576.62419514,0,0,0,1,0,0,0,1e+20,1e+20,0

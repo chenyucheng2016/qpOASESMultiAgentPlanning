@@ -113,6 +113,8 @@ def write_run_manifest(path, arguments, executable, tasks, status_path):
         "git_commit": arguments.git_commit,
         "executable": str(executable),
         "executable_sha256": sha256(executable),
+        "runner": str(Path(__file__).resolve()),
+        "runner_sha256": sha256(Path(__file__).resolve()),
         "suite": arguments.suite,
         "track": arguments.track,
         "manual_cases": list(arguments.manual_cases),
@@ -315,6 +317,9 @@ def main():
         output_dir / "run_manifest.json", arguments, executable, tasks, status_path)
     for index, (selector, method, repetition, result_path, selector_arguments) in enumerate(tasks, 1):
         key = (selector, method, repetition)
+        partial = result_path.with_suffix(".partial.csv")
+        partial_trace = Path(str(partial) + ".scp.csv")
+        final_trace = Path(str(result_path) + ".scp.csv")
         existing = read_single_result(result_path)
         if existing is not None:
             if key not in statuses or statuses[key].get("execution_status") != "completed":
@@ -324,6 +329,8 @@ def main():
                     result_path, log_path, "resumed result"
                 )
                 write_statuses(status_path, statuses)
+            if partial_trace.is_file() and not final_trace.exists():
+                os.replace(partial_trace, final_trace)
             print(f"[{index}/{total}] resume {selector} {method}", flush=True)
             continue
         previous = statuses.get(key)
@@ -331,7 +338,6 @@ def main():
             print(f"[{index}/{total}] skip {selector} {method} ({previous['execution_status']})", flush=True)
             continue
 
-        partial = result_path.with_suffix(".partial.csv")
         log_path = result_path.with_suffix(".log")
         command = [
             str(executable), "--suite", arguments.suite, "--track", arguments.track,
@@ -360,6 +366,8 @@ def main():
             row = read_single_result(partial)
             if completed.returncode == 0 and row is not None:
                 os.replace(partial, result_path)
+                if partial_trace.is_file():
+                    os.replace(partial_trace, final_trace)
                 state = "completed"
                 message = "completed"
             else:

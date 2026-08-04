@@ -1,9 +1,43 @@
 # TurboADMM-NL development benchmark status
 
-This is development evidence collected through 2026-08-03. It is not the locked
+This is development evidence collected through 2026-08-04. It is not the locked
 30-seed final-paper experiment. The WSL build used GCC 9.4, OpenMP, and OSQP
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
+
+## Revision 8 manifest-locked deterministic pilot
+
+The frozen `ral-deterministic-v1-pilot` protocol records commit `faa8c18`, the
+executable SHA-256, fixed `rho=35`, exact early ADMM, the automatic OpenMP team
+policy, a 300-second cap, and all 36 interleaved tasks in `run_manifest.json`.
+Changing any recorded configuration or rebuilding the executable prevents that
+directory from being resumed.
+
+The complete six-scenario by six-method WSL pilot records 28 completed solver
+rows and eight censored timeouts. Full TurboADMM-NL strictly converges and
+validates on all six headline scenarios. Centralized OSQP returns four valid
+trajectories, but three stop at the SCP limit; its warehouse and maze rows time
+out. Centralized qpOASES has two strict successes, two QP failures with
+validator-feasible iterates, and two timeouts.
+
+| Scenario | Full | OSQP | qpOASES | QP continuation | Inner | Cold |
+|---|---:|---:|---:|---:|---:|---:|
+| easy open | 0.541 | 0.250 | 0.642 | 0.468 | 0.721 | 10.734 |
+| easy blocker | 0.545 | 0.992* | 1.368 | 0.578 | 0.866 | 19.632 |
+| medium doorway | 3.550 | 28.632* | F (179.886) | 9.338 | 14.255 | T |
+| hard heterogeneous doorway | 8.314 | 106.903* | F (99.403) | 19.085* | 26.862* | T |
+| hard warehouse | 47.314 | T | T | 97.175* | 263.538* | T |
+| very hard maze | 61.454 | T | T | 103.656* | 278.336* | T |
+
+Values are solver time in seconds. `T` is a 300-second process timeout; `F` is
+a solver failure. An asterisk marks an independently valid trajectory returned
+without strict SCP convergence. On the four cases where OSQP returns a row,
+Turbo's objective gaps are `0.013%`, `-0.026%`, `0.494%`, and `2.319%`,
+respectively.
+
+This is a one-repetition configuration gate, not the paper timing table. The
+ten-repetition deterministic run remains locked until core solver parameters
+and CSDO comparison behavior are frozen.
 
 ## Revision 7 delayed pair-feasibility polishing
 

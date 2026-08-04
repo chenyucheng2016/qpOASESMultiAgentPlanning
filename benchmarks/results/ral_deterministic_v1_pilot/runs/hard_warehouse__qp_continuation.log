@@ -1,0 +1,2 @@
+ERROR:  Unable to perform homotopy as previous QP is not solved
+balanced n=8 m=8 seed=0 qp_continuation: solver=1 validator=1 97175.02 ms

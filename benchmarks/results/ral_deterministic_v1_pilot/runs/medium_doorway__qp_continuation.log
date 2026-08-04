@@ -1,0 +1,2 @@
+ERROR:  Unable to perform homotopy as previous QP is not solved
+unicycle n=4 m=2 seed=0 qp_continuation: solver=1 validator=1 9337.94 ms

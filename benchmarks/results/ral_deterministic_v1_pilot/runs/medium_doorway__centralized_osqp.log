@@ -1,0 +1,1 @@
+unicycle n=4 m=2 seed=0 centralized_osqp: solver=1 validator=1 28632.32 ms

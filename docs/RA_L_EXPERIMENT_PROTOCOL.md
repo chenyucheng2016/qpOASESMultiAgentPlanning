@@ -207,9 +207,9 @@ seeds and paired seed-wise statistics. Solver-internal time and process wall
 time are both retained. Timeouts remain censored failures at 300 seconds.
 
 Every run directory contains `run_manifest.json`, including the Git commit,
-executable SHA-256, exact solver flags, OpenMP policy, timeout, and complete
-task order. The runner rejects an attempt to resume that directory with a
-different binary or configuration.
+executable and runner SHA-256 values, exact solver flags, OpenMP policy,
+timeout, and complete task order. The runner rejects an attempt to resume that
+directory with a different binary, runner, or configuration.
 
 The one-repetition protocol check and locked ten-repetition run are launched
 from WSL with:

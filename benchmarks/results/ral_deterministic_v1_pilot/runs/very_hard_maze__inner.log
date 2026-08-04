@@ -1,0 +1,5 @@
+WARNING:   Stepsize is 0.000000000000000e+00
+WARNING:   Stepsize is 0.000000000000000e+00
+WARNING:   Stepsize is 0.000000000000000e+00
+WARNING:   Stepsize is 0.000000000000000e+00
+balanced n=8 m=16 seed=0 inner: solver=1 validator=1 278336.19 ms

@@ -1,0 +1,220 @@
+{
+  "configuration": {
+    "exact_admm": true,
+    "executable": "/mnt/c/Users/cheny/Documents/GitHub/qpOASESMultiAgentPlanning/worktree-feat-nonlinear/build-ral-wsl/bin/nonlinear_benchmark",
+    "executable_sha256": "6c4e3eda6e1b3bda268d18b631233bfc22a1501f99f896a85efaadf79ed8c2f4",
+    "fixed_rho": true,
+    "git_commit": "faa8c18",
+    "manual_cases": [
+      "easy_open",
+      "easy_single_blocker",
+      "medium_doorway",
+      "hard_heterogeneous_doorway",
+      "hard_warehouse",
+      "very_hard_maze"
+    ],
+    "methods": [
+      "full",
+      "centralized_osqp",
+      "centralized_qpoases",
+      "qp_continuation",
+      "inner",
+      "cold"
+    ],
+    "omp_dynamic": "FALSE",
+    "omp_places": "cores",
+    "omp_proc_bind": "close",
+    "protocol_id": "ral-deterministic-v1-pilot",
+    "repetitions": 1,
+    "scenario_indices": [],
+    "schedule": "interleaved",
+    "schedule_seed": 20260804,
+    "suite": "manual",
+    "task_order": [
+      {
+        "method": "inner",
+        "repetition": 1,
+        "selector": "easy_open"
+      },
+      {
+        "method": "cold",
+        "repetition": 1,
+        "selector": "easy_open"
+      },
+      {
+        "method": "full",
+        "repetition": 1,
+        "selector": "easy_open"
+      },
+      {
+        "method": "centralized_osqp",
+        "repetition": 1,
+        "selector": "easy_open"
+      },
+      {
+        "method": "centralized_qpoases",
+        "repetition": 1,
+        "selector": "easy_open"
+      },
+      {
+        "method": "qp_continuation",
+        "repetition": 1,
+        "selector": "easy_open"
+      },
+      {
+        "method": "cold",
+        "repetition": 1,
+        "selector": "easy_single_blocker"
+      },
+      {
+        "method": "full",
+        "repetition": 1,
+        "selector": "easy_single_blocker"
+      },
+      {
+        "method": "centralized_osqp",
+        "repetition": 1,
+        "selector": "easy_single_blocker"
+      },
+      {
+        "method": "centralized_qpoases",
+        "repetition": 1,
+        "selector": "easy_single_blocker"
+      },
+      {
+        "method": "qp_continuation",
+        "repetition": 1,
+        "selector": "easy_single_blocker"
+      },
+      {
+        "method": "inner",
+        "repetition": 1,
+        "selector": "easy_single_blocker"
+      },
+      {
+        "method": "full",
+        "repetition": 1,
+        "selector": "medium_doorway"
+      },
+      {
+        "method": "centralized_osqp",
+        "repetition": 1,
+        "selector": "medium_doorway"
+      },
+      {
+        "method": "centralized_qpoases",
+        "repetition": 1,
+        "selector": "medium_doorway"
+      },
+      {
+        "method": "qp_continuation",
+        "repetition": 1,
+        "selector": "medium_doorway"
+      },
+      {
+        "method": "inner",
+        "repetition": 1,
+        "selector": "medium_doorway"
+      },
+      {
+        "method": "cold",
+        "repetition": 1,
+        "selector": "medium_doorway"
+      },
+      {
+        "method": "centralized_osqp",
+        "repetition": 1,
+        "selector": "hard_heterogeneous_doorway"
+      },
+      {
+        "method": "centralized_qpoases",
+        "repetition": 1,
+        "selector": "hard_heterogeneous_doorway"
+      },
+      {
+        "method": "qp_continuation",
+        "repetition": 1,
+        "selector": "hard_heterogeneous_doorway"
+      },
+      {
+        "method": "inner",
+        "repetition": 1,
+        "selector": "hard_heterogeneous_doorway"
+      },
+      {
+        "method": "cold",
+        "repetition": 1,
+        "selector": "hard_heterogeneous_doorway"
+      },
+      {
+        "method": "full",
+        "repetition": 1,
+        "selector": "hard_heterogeneous_doorway"
+      },
+      {
+        "method": "centralized_qpoases",
+        "repetition": 1,
+        "selector": "hard_warehouse"
+      },
+      {
+        "method": "qp_continuation",
+        "repetition": 1,
+        "selector": "hard_warehouse"
+      },
+      {
+        "method": "inner",
+        "repetition": 1,
+        "selector": "hard_warehouse"
+      },
+      {
+        "method": "cold",
+        "repetition": 1,
+        "selector": "hard_warehouse"
+      },
+      {
+        "method": "full",
+        "repetition": 1,
+        "selector": "hard_warehouse"
+      },
+      {
+        "method": "centralized_osqp",
+        "repetition": 1,
+        "selector": "hard_warehouse"
+      },
+      {
+        "method": "qp_continuation",
+        "repetition": 1,
+        "selector": "very_hard_maze"
+      },
+      {
+        "method": "inner",
+        "repetition": 1,
+        "selector": "very_hard_maze"
+      },
+      {
+        "method": "cold",
+        "repetition": 1,
+        "selector": "very_hard_maze"
+      },
+      {
+        "method": "full",
+        "repetition": 1,
+        "selector": "very_hard_maze"
+      },
+      {
+        "method": "centralized_osqp",
+        "repetition": 1,
+        "selector": "very_hard_maze"
+      },
+      {
+        "method": "centralized_qpoases",
+        "repetition": 1,
+        "selector": "very_hard_maze"
+      }
+    ],
+    "threads": 0,
+    "timeout_seconds": 300.0,
+    "track": "all"
+  },
+  "created_utc": "2026-08-04T06:54:00.047717+00:00"
+}

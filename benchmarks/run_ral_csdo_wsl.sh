@@ -15,7 +15,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 case_manifest="benchmarks/instances/csdo/passing_bay_sweep/development_manifest.csv"
-result_root="build-ral-wsl/results/csdo_ral/development_passing_bay_v1"
+result_root="build-ral-wsl/results/csdo_ral/development_passing_bay_v2"
 result_csv="${result_root}/results.csv"
 work_root="${result_root}/cases"
 csdo_root="../CSDOTrajectoryPlanning"
@@ -28,9 +28,10 @@ runner_args=(
   --csdo-config "${csdo_root}/config.yaml"
   --work-root "${work_root}"
   --output-csv "${result_csv}"
-  --protocol-id "csdo_passing_bay_development_v1"
+  --protocol-id "csdo_passing_bay_development_v2"
   --git-commit "${git_commit}"
   --schedule-seed 20260804
+  --corridor-recovery-window 3
   --timeout 120
 )
 if [[ "${mode}" == "resume" ]]; then

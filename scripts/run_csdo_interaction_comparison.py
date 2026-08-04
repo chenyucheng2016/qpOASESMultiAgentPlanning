@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--delay-stages", type=int, default=0)
     parser.add_argument("--sequential-delay-stages", type=int, default=0)
     parser.add_argument("--independent", action="store_true")
+    parser.add_argument("--corridor-recovery-window", type=int, default=0)
     parser.add_argument("--timeout", type=float, default=7200.0)
     return parser.parse_args()
 
@@ -128,10 +129,15 @@ def main():
     root_corridor = args.work_dir / "root_corridors.yaml"
     root_metadata = args.work_dir / "root_metadata.yaml"
     turbo_output = (args.work_dir / "turbo.yaml").resolve()
+    turbo_primary_output = (args.work_dir / "turbo_primary.yaml").resolve()
     for path in (csdo_output, csdo_guess, csdo_corridor, root_guess,
-                 root_corridor, root_metadata, turbo_output):
+                 root_corridor, root_metadata, turbo_output,
+                 turbo_primary_output, args.work_dir / "turbo.log",
+                 args.work_dir / "turbo_primary.log"):
         if path.exists():
             path.unlink()
+    if args.corridor_recovery_window < 0:
+        raise RuntimeError("corridor recovery window must be nonnegative")
 
     csdo_command = [
         str(args.csdo_executable.resolve()),
@@ -214,6 +220,30 @@ def main():
     ]
     turbo_code, turbo_wall, turbo_log = run(
         turbo_command, args.turbo_executable.resolve().parent, args.timeout)
+    turbo_primary_code = turbo_code
+    turbo_primary_wall = turbo_wall
+    turbo_recovery_used = False
+    primary_result = load_yaml(turbo_output) if turbo_output.exists() else None
+    primary_valid = bool(
+        primary_result
+        and primary_result.get("schedule")
+        and primary_result.get("statistics", {}).get("validated"))
+    if args.corridor_recovery_window > 0 and not primary_valid:
+        turbo_recovery_used = True
+        if turbo_output.exists():
+            turbo_output.replace(turbo_primary_output)
+        (args.work_dir / "turbo_primary.log").write_text(
+            turbo_log, encoding="utf-8")
+        recovery_command = turbo_command + [
+            "--corridor-window", str(args.corridor_recovery_window),
+        ]
+        recovery_code, recovery_wall, recovery_log = run(
+            recovery_command,
+            args.turbo_executable.resolve().parent,
+            args.timeout)
+        turbo_code = recovery_code
+        turbo_wall += recovery_wall
+        turbo_log = recovery_log
     (args.work_dir / "turbo.log").write_text(turbo_log, encoding="utf-8")
     turbo_result = load_yaml(turbo_output) if turbo_output.exists() else None
     guess = load_yaml(guess_path)
@@ -239,9 +269,13 @@ def main():
         "turbo_success": turbo_success,
         "csdo_return_code": csdo_code,
         "turbo_return_code": turbo_code,
+        "turbo_primary_return_code": turbo_primary_code,
         "csdo_wall_time": csdo_wall,
         "root_export_wall_time": export_wall,
         "turbo_wall_time": turbo_wall,
+        "turbo_primary_wall_time": turbo_primary_wall,
+        "turbo_recovery_used": turbo_recovery_used,
+        "turbo_corridor_recovery_window": args.corridor_recovery_window,
     }
     metric_template = interaction_metrics(instance_data, guess, guess)
     if turbo_output_available:

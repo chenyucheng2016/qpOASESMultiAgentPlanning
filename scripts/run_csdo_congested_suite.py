@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument("--protocol-id", required=True)
     parser.add_argument("--git-commit", required=True)
     parser.add_argument("--schedule-seed", type=int, default=20260804)
+    parser.add_argument("--corridor-recovery-window", type=int, default=0)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
@@ -138,6 +139,7 @@ def main():
         "git_commit": args.git_commit,
         "schedule_seed": args.schedule_seed,
         "timeout_s": args.timeout,
+        "corridor_recovery_window": args.corridor_recovery_window,
         "files": {
             "case_manifest": file_record(args.manifest),
             "suite_runner": file_record(pathlib.Path(__file__)),
@@ -205,6 +207,8 @@ def main():
             "--work-dir", str(work_dir),
             "--output-csv", str(case_result),
             "--threads", str(task["threads"]),
+            "--corridor-recovery-window",
+            str(args.corridor_recovery_window),
             "--timeout", str(args.timeout),
         ]
         print(f"running {instance.name}", flush=True)

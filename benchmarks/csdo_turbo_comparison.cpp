@@ -26,7 +26,8 @@ struct Arguments
     std::string corridor;
     std::string output;
     int_t threads;
-    Arguments() : threads(0) {}
+    int_t corridorWindow;
+    Arguments() : threads(0), corridorWindow(0) {}
 };
 
 struct CsdoGeometry
@@ -54,6 +55,9 @@ Arguments parseArguments(int argc, char* argv[])
             arguments.output = argv[++index];
         else if (option == "--threads" && index + 1 < argc)
             arguments.threads = static_cast<int_t>(std::atoi(argv[++index]));
+        else if (option == "--corridor-window" && index + 1 < argc)
+            arguments.corridorWindow =
+                static_cast<int_t>(std::atoi(argv[++index]));
         else
             throw std::runtime_error("unknown or incomplete argument: " + option);
     }
@@ -62,9 +66,11 @@ Arguments parseArguments(int argc, char* argv[])
         throw std::runtime_error(
             "usage: csdo_turbo_comparison --input INSTANCE "
             "--guess CSDO_GUESSES --corridor CSDO_CORRIDORS "
-            "--output RESULT [--threads N]");
+            "--output RESULT [--threads N] [--corridor-window N]");
     if (arguments.threads < 0)
         throw std::runtime_error("--threads must be nonnegative");
+    if (arguments.corridorWindow < 0)
+        throw std::runtime_error("--corridor-window must be nonnegative");
     return arguments;
 }
 
@@ -155,7 +161,8 @@ std::vector<NonlinearAgentProblem> readAgents(
     const YAML::Node& input,
     const YAML::Node& guess,
     const YAML::Node& corridors,
-    const FrontSteeringModel& model)
+    const FrontSteeringModel& model,
+    int_t corridorWindow)
 {
     const std::vector<std::string> names = agentNames(input);
     const YAML::Node schedule = guess["schedule"];
@@ -235,11 +242,30 @@ std::vector<NonlinearAgentProblem> readAgents(
             if (!box.IsSequence() || box.size() != 6)
                 throw std::runtime_error(
                     "CSDO corridor entries must contain nominal x/y and four bounds");
-            const std::size_t index = (stage * 2 + circle) * 2;
-            problem.collisionCorridorLowerBounds[index] = box[2].as<real_t>();
-            problem.collisionCorridorUpperBounds[index] = box[3].as<real_t>();
-            problem.collisionCorridorLowerBounds[index + 1] = box[4].as<real_t>();
-            problem.collisionCorridorUpperBounds[index + 1] = box[5].as<real_t>();
+            const std::size_t firstStage = stage
+                > static_cast<std::size_t>(corridorWindow)
+                ? stage - corridorWindow : 0;
+            const std::size_t lastStage = std::min(
+                stateCount - 1,
+                stage + static_cast<std::size_t>(corridorWindow));
+            for (std::size_t coordinate = 0; coordinate < 2; ++coordinate)
+            {
+                real_t lower = INFTY;
+                real_t upper = -INFTY;
+                for (std::size_t source = firstStage;
+                     source <= lastStage; ++source)
+                {
+                    const YAML::Node sourceBox =
+                        corridorNodes[2 * source + circle];
+                    lower = std::min(lower,
+                        sourceBox[2 + 2 * coordinate].as<real_t>());
+                    upper = std::max(upper,
+                        sourceBox[3 + 2 * coordinate].as<real_t>());
+                }
+                const std::size_t index = (stage * 2 + circle) * 2 + coordinate;
+                problem.collisionCorridorLowerBounds[index] = lower;
+                problem.collisionCorridorUpperBounds[index] = upper;
+            }
         }
         problem.obstacleSafetyDistance = 0.0;
         problem.terminalPositionTolerance = 1.0e-3;
@@ -338,7 +364,8 @@ void writeResult(
     const NonlinearTurboResult& result,
     const NonlinearValidationResult& validation,
     real_t objective,
-    real_t exactObstacleClearance)
+    real_t exactObstacleClearance,
+    int_t corridorWindow)
 {
     YAML::Emitter output;
     output << YAML::BeginMap;
@@ -368,6 +395,8 @@ void writeResult(
         << validation.maximumTerminalPositionError;
     output << YAML::Key << "maximum_terminal_state_error" << YAML::Value
         << validation.maximumTerminalStateError;
+    output << YAML::Key << "corridor_temporal_window" << YAML::Value
+        << corridorWindow;
     output << YAML::Key << "parallel_threads" << YAML::Value
         << result.statistics.parallelAgentThreads;
     output << YAML::Key << "qp_build_time" << YAML::Value
@@ -493,7 +522,8 @@ int main(int argc, char* argv[])
         const real_t timeStep = 3.0 * 0.706 / 1.0 / 3.0 / 0.8;
         FrontSteeringModel model(timeStep, 1.0);
         const std::vector<NonlinearAgentProblem> agents =
-            readAgents(input, guess, corridors, model);
+            readAgents(
+                input, guess, corridors, model, arguments.corridorWindow);
 
         NonlinearTurboOptions options;
         options.coordinationMethod = NCM_DISTRIBUTED_ADMM;
@@ -575,7 +605,8 @@ int main(int argc, char* argv[])
             result,
             validation,
             objective,
-            exactObstacleClearance
+            exactObstacleClearance,
+            arguments.corridorWindow
         );
         std::cout << "TurboADMM-NL: " << result.status
             << ", solver " << result.statistics.solveTimeMilliseconds / 1000.0

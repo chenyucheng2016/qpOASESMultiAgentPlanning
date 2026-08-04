@@ -72,6 +72,10 @@ def main():
         "csdo_return_code",
         "turbo_return_code",
         "csdo_wall_time",
+        "turbo_primary_return_code",
+        "turbo_primary_wall_time",
+        "turbo_recovery_used",
+        "turbo_corridor_recovery_window",
         "turbo_wall_time",
         "paired_outcome",
         "pbs_success",
@@ -123,6 +127,13 @@ def main():
             "runner_return_code": status.get("runner_return_code"),
             "csdo_return_code": case_result.get("csdo_return_code"),
             "turbo_return_code": case_result.get("turbo_return_code"),
+            "turbo_primary_return_code": case_result.get(
+                "turbo_primary_return_code"),
+            "turbo_primary_wall_time": case_result.get(
+                "turbo_primary_wall_time"),
+            "turbo_recovery_used": case_result.get("turbo_recovery_used"),
+            "turbo_corridor_recovery_window": case_result.get(
+                "turbo_corridor_recovery_window"),
             "csdo_wall_time": case_result.get("csdo_wall_time"),
             "turbo_wall_time": case_result.get("turbo_wall_time"),
             "paired_outcome": paired_outcome(csdo_valid, turbo_valid),

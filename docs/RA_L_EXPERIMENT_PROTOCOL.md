@@ -269,6 +269,10 @@ ADMM timeout, safety violation, dynamics violation, or terminal violation.
    A recovery or trajectory-quality claim requires a family-level paired effect,
    not one hand-selected failure. Runtime is retained as a secondary metric even
    when recovery success is the primary comparison.
+   The 24-case passing-bay grid is development data. After its parameters are
+   fixed, generate a distinct evaluation grid, record all rows, and do not tune
+   the solver, initializer, horizon, tolerance, or time cap on those evaluation
+   outcomes.
 5. Reproducibility: a clean build can run tests, smoke benchmarks, analysis,
    and figure generation from documented commands.
 

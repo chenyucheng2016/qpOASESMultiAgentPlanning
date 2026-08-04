@@ -215,18 +215,17 @@ def main():
     turbo_code, turbo_wall, turbo_log = run(
         turbo_command, args.turbo_executable.resolve().parent, args.timeout)
     (args.work_dir / "turbo.log").write_text(turbo_log, encoding="utf-8")
-    if not turbo_output.exists():
-        raise RuntimeError("Turbo did not produce an output; see turbo.log")
-    turbo_result = load_yaml(turbo_output)
+    turbo_result = load_yaml(turbo_output) if turbo_output.exists() else None
     guess = load_yaml(guess_path)
     instance_data = load_yaml(instance)
     names = [agent.get("name", f"agent{index}")
              for index, agent in enumerate(instance_data["agents"])]
-    turbo_schedule = turbo_result.get("schedule", {})
+    turbo_schedule = turbo_result.get("schedule", {}) if turbo_result else {}
     turbo_output_available = bool(
         turbo_schedule and all(name in turbo_schedule for name in names))
     turbo_success = bool(
-        turbo_output_available
+        turbo_result
+        and turbo_output_available
         and turbo_result.get("statistics", {}).get("validated"))
 
     row = {

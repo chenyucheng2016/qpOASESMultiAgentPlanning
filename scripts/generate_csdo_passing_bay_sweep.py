@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the predeclared CSDO passing-bay development family."""
+"""Generate predeclared CSDO passing-bay development/evaluation families."""
 
 import argparse
 import csv
@@ -9,8 +9,18 @@ import pathlib
 from generate_csdo_congested_scenarios import write_instance
 
 
-BAY_LENGTHS = (7.2, 8.1, 9.0, 9.9)
-ARRIVAL_OFFSETS = (-1.0, 0.0, 1.0)
+FAMILIES = {
+    "development": (
+        (7.2, 8.1, 9.0, 9.9),
+        (-1.0, 0.0, 1.0),
+        "passing_bay_recovery_development",
+    ),
+    "evaluation": (
+        (7.5, 8.4, 9.3, 10.2),
+        (-1.5, -0.5, 0.5, 1.5),
+        "passing_bay_recovery_evaluation",
+    ),
+}
 PRIORITIES = (("forward", (0, 1)), ("reverse", (1, 0)))
 CENTER_X = 15.05
 
@@ -22,6 +32,8 @@ def parse_args():
         type=pathlib.Path,
         default=pathlib.Path("benchmarks/instances/csdo/passing_bay_sweep"),
     )
+    parser.add_argument(
+        "--split", choices=tuple(FAMILIES), default="development")
     return parser.parse_args()
 
 
@@ -60,11 +72,13 @@ def tenths_label(value):
 
 
 def main():
-    output_dir = parse_args().output_dir
+    args = parse_args()
+    output_dir = args.output_dir
+    bay_lengths, arrival_offsets, family = FAMILIES[args.split]
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = []
-    for bay_length in BAY_LENGTHS:
-        for arrival_offset in ARRIVAL_OFFSETS:
+    for bay_length in bay_lengths:
+        for arrival_offset in arrival_offsets:
             for priority, order in PRIORITIES:
                 stem = (
                     f"passing_bay_l{round(10.0 * bay_length):02d}_"
@@ -78,7 +92,7 @@ def main():
                     obstacles(bay_length),
                 )
                 rows.append((
-                    "passing_bay_recovery_development",
+                    family,
                     bay_length,
                     arrival_offset,
                     priority,
@@ -86,7 +100,7 @@ def main():
                     filename,
                     "recovery",
                 ))
-    with (output_dir / "development_manifest.csv").open(
+    with (output_dir / f"{args.split}_manifest.csv").open(
             "w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow((

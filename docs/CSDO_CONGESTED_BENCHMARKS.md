@@ -24,6 +24,32 @@ summarizer. It writes one result per case, records status incrementally, and
 rebuilds the aggregate CSV deterministically. Resume refuses any hash or
 configuration mismatch. These cases are for method development; a separate
 evaluation family must be frozen before the final paper claim is measured.
+## Frozen passing-bay evaluation protocol
+
+Before observing outcomes, evaluation v1 freezes all 32 combinations of bay
+lengths `7.5`, `8.4`, `9.3`, and `10.2` m; arrival offsets `-1.5`, `-0.5`,
+`0.5`, and `1.5` m; and both priority orders. There is no instance overlap with
+the development family. The grid interpolates between development settings and
+includes one larger-bay extrapolation.
+
+The method is frozen to the v2 development policy: original CSDO corridor
+first, then a three-stage temporal corridor fallback only after strict primary
+failure. The protocol uses schedule seed `20260805`, one Turbo agent thread,
+the unchanged independent validator, and a 120-second cap per attempt. Every
+row and every attempted solve is retained, with total Turbo wall time including
+fallback work.
+
+The predeclared paper-facing gates are:
+
+1. Turbo validates on at least `90%` of all 32 cases.
+2. Turbo validates at least `80%` of cases where the common PBS/root fails.
+3. Turbo's success rate exceeds CSDO's by at least 20 percentage points.
+4. Every reported success passes the unchanged pair, obstacle, dynamics, and
+   terminal tolerances.
+
+The family is frozen in `evaluation_manifest.csv` and has not been run when
+these gates are committed.
+
 
 ## Frozen families
 

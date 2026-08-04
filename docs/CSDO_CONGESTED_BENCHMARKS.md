@@ -142,10 +142,45 @@ numerical-zero dynamics defect. Median Turbo wall time changes from `6.73` to
 `7.61` seconds; runtime remains a disclosed secondary metric. Exact artifacts
 are under `build-ral-wsl/results/csdo_ral/development_passing_bay_81c070a`.
 
-All four remaining failures use the 7.2 m bay. Its exported fixed CSDO
-corridors never give both footprint discs simultaneous lateral bay freedom, so
-the common convex subproblem cannot represent a passing maneuver. The cases
-remain in the table rather than being removed or given expanded corridors.
+### Temporal corridor recovery v2
+
+The four v1 failures reveal a specific limitation of the shared front end: a
+failed PBS root exports time-indexed static-obstacle boxes that can exclude a
+feasible retiming even though the exact polygon obstacles leave free space.
+The v2 protocol first solves with those original boxes. Only after strict
+validation fails, it retries the same root warm start with each box replaced by
+the coordinate-wise union over three neighboring stages on either side. The
+number of corridor rows is unchanged, exact polygon and circular obstacles
+remain authoritative, and both attempts contribute to reported wall time.
+
+The manifest-locked exact-commit run at `133dec2` reports:
+
+| Outcome | Fixed corridor v1 | Recovery fallback v2 |
+|---|---:|---:|
+| CSDO valid | 12 | 12 |
+| Turbo valid | 20 | 24 |
+| both valid | 12 | 12 |
+| Turbo only | 8 | 12 |
+| CSDO only | 0 | 0 |
+| neither valid | 4 | 0 |
+
+Turbo validates all 11 PBS-failure cases; CSDO validates none of those 11.
+The fallback is invoked only for the four strict primary failures and recovers
+all four, so none of the 20 primary successes regress. Across all valid Turbo
+outputs, maximum terminal error is `0.910` mm, minimum pair and obstacle
+clearances are `0.664` mm and `44.14` mm, and dynamics defect is numerical
+zero.
+
+Median total Turbo wall time is `8.34` seconds, including recovery attempts,
+versus `0.245` seconds for CSDO; runtime is not the claimed advantage. On the
+12 shared successes, Turbo has a lower arrival-stage sum in eight cases and
+ties four, with a median `8.95%` reduction. It has shorter paths in eight cases
+with a median `1.57%` reduction, while its median smoothness objective is worse
+(`0.891` versus `0.334`). Exact artifacts are under
+`build-ral-wsl/results/csdo_ral/development_passing_bay_v2`.
+
+The three-stage window was selected on this development family. A disjoint
+evaluation family must be frozen before this becomes a final-paper result.
 
 ## Publication gate
 

@@ -32,18 +32,28 @@ remains much faster on medium doorway (`3.74` versus `28.67` seconds) and hard
 heterogeneous doorway (`9.26` versus `106.97` seconds). The two centralized
 OSQP large-scale rows remain failures.
 
-On the exact-commit rerun of the frozen 24-case passing-bay development family,
-Turbo improves from 14 valid cases to 20. Outcomes are 12 shared successes,
-eight Turbo-only recoveries, zero CSDO-only cases, and four failures for both
-methods. A preceding run of the same candidate reported 11 shared and nine
-Turbo-only cases because CSDO's maximum dynamics defect on
-`passing_bay_l99_om10_reverse` changed from `0.01269` to `0.00465` across the
-fixed `0.01` validator threshold; Turbo was valid in both runs. Maximum valid
-Turbo terminal error is `0.910` mm; minimum pair and obstacle clearances are
-`0.664` mm and `50.0` mm; dynamics defect is numerical zero. Median Turbo wall
-time rises from `6.73` to `7.61` seconds. This passes the 80% Turbo validity
-gate, but exact-commit recovery is `8/12 = 66.7%`, below the predeclared 70%
-gate. These remain development results, not the locked final-paper claim.
+On the exact-commit v2 rerun of the frozen 24-case passing-bay development
+family, Turbo validates all 24 cases. Outcomes are 12 shared successes and 12
+Turbo-only successes, with no CSDO-only or joint failures. Turbo validates all
+11 cases where the common PBS/root search fails; CSDO validates none. The
+fixed-corridor primary solve retains its previous 20 successes, and a
+three-stage temporal corridor fallback is invoked only for and repairs the four
+remaining primary failures.
+
+Maximum Turbo terminal error is `0.910` mm; minimum pair and exact-obstacle
+clearances are `0.664` mm and `44.14` mm; dynamics defect is numerical zero.
+Median total Turbo wall time, including both attempts when recovery is used, is
+`8.34` seconds versus CSDO's `0.245` seconds, so runtime is explicitly not the
+CSDO-comparison claim. On the 12 shared successes, Turbo reduces the arrival
+sum in eight and ties four (median `8.95%` reduction), and shortens paths in
+eight (median `1.57%` reduction), while its median smoothness objective is
+worse (`0.891` versus `0.334`).
+
+The result is manifest-locked to commit `133dec2`, schedule seed `20260804`, a
+120-second per-attempt cap, and Turbo executable SHA-256
+`14e246c033c0087505ddf5fdca80f3927c16583d182f28f2a0e3821e8038c035`. The
+three-stage window was selected on this development family; a disjoint frozen
+evaluation family is still required before making the final-paper claim.
 
 ## Revision 8 manifest-locked deterministic pilot
 

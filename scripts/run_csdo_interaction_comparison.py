@@ -193,8 +193,15 @@ def main():
             export_log, encoding="utf-8")
         if export_code != 0:
             raise RuntimeError("PBS-root export failed; see root_exporter.log")
-        guess_path, corridor_path = root_guess, root_corridor
         metadata = load_yaml(root_metadata)
+        reference_guess_path = root_guess
+        corridor_path = root_corridor
+        if csdo_output_available:
+            guess_path = csdo_output
+            metadata["warmstart_source"] = "csdo_solution_repair"
+            metadata["warmstart_conflicting_pairs"] = None
+        else:
+            guess_path = root_guess
     elif args.mode == "joint_repair":
         if not csdo_output_available:
             raise RuntimeError(
@@ -207,6 +214,7 @@ def main():
             "warmstart_conflicting_pairs": None,
             "search_time": csdo_statistics.get("runtime_search"),
         }
+        reference_guess_path = guess_path
         export_wall = 0.0
     else:
         if not csdo_success or not csdo_guess.exists() or not csdo_corridor.exists():
@@ -219,6 +227,7 @@ def main():
             "warmstart_conflicting_pairs": 0,
             "search_time": csdo_result["statistics"].get("runtime_search"),
         }
+        reference_guess_path = guess_path
         export_wall = 0.0
 
     turbo_command = [
@@ -258,7 +267,7 @@ def main():
         turbo_log = recovery_log
     (args.work_dir / "turbo.log").write_text(turbo_log, encoding="utf-8")
     turbo_result = load_yaml(turbo_output) if turbo_output.exists() else None
-    guess = load_yaml(guess_path)
+    guess = load_yaml(reference_guess_path)
     instance_data = load_yaml(instance)
     names = [agent.get("name", f"agent{index}")
              for index, agent in enumerate(instance_data["agents"])]

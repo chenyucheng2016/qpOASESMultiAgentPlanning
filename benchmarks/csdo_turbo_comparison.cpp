@@ -383,7 +383,8 @@ void writeResult(
     real_t exactObstacleClearance,
     int_t corridorWindow,
     int_t inputHorizon,
-    int_t normalizedHorizon)
+    int_t normalizedHorizon,
+    int_t optimizerCollisionSamples)
 {
     YAML::Emitter output;
     output << YAML::BeginMap;
@@ -419,6 +420,8 @@ void writeResult(
         << inputHorizon;
     output << YAML::Key << "normalized_horizon" << YAML::Value
         << normalizedHorizon;
+    output << YAML::Key << "optimizer_collision_samples_per_interval"
+        << YAML::Value << optimizerCollisionSamples;
     output << YAML::Key << "parallel_threads" << YAML::Value
         << result.statistics.parallelAgentThreads;
     output << YAML::Key << "qp_build_time" << YAML::Value
@@ -554,7 +557,7 @@ int main(int argc, char* argv[])
         options.useRiccatiWarmStart = true;
         options.parallelAgentSolves = true;
         options.parallelAgentThreads = arguments.threads;
-        options.collisionSamplesPerInterval = 10;
+        options.collisionSamplesPerInterval = 2;
         options.maxScpIterations = 40;
         options.maxAdmmIterations = 100;
         options.polishingAdmmIterations = 300;
@@ -634,7 +637,8 @@ int main(int argc, char* argv[])
             exactObstacleClearance,
             arguments.corridorWindow,
             inputHorizon,
-            agents.front().horizon
+            agents.front().horizon,
+            options.collisionSamplesPerInterval
         );
         std::cout << "TurboADMM-NL: " << result.status
             << ", solver " << result.statistics.solveTimeMilliseconds / 1000.0

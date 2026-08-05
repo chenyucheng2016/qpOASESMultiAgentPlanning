@@ -15,7 +15,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 case_manifest="benchmarks/instances/csdo/congested/within_flow_manifest.csv"
-result_root="build-ral-wsl/results/csdo_ral/development_five_agent_v1"
+result_root="build-ral-wsl/results/csdo_ral/development_five_agent_joint_repair_v2"
 result_csv="${result_root}/results.csv"
 work_root="${result_root}/cases"
 csdo_root="../CSDOTrajectoryPlanning"
@@ -28,7 +28,7 @@ runner_args=(
   --csdo-config "${csdo_root}/config.yaml"
   --work-root "${work_root}"
   --output-csv "${result_csv}"
-  --protocol-id "csdo_five_agent_development_v1"
+  --protocol-id "csdo_five_agent_joint_repair_v2"
   --git-commit "${git_commit}"
   --schedule-seed 20260806
   --corridor-recovery-window 3

@@ -102,6 +102,20 @@ def aggregate_summary(scope, value, group):
         as_float(row, "baseline_time_s") for row in group if row["baseline_success"]
     ]
     speedups = [as_float(row, "baseline_over_candidate") for row in group]
+    candidate_wall_times = [
+        as_float(row, "candidate_wall_time_s") for row in group if row["candidate_success"]
+    ]
+    baseline_wall_times = [
+        as_float(row, "baseline_wall_time_s") for row in group if row["baseline_success"]
+    ]
+    wall_speedups = [as_float(row, "baseline_over_candidate_wall") for row in group]
+    candidate_peak_memory = [
+        as_float(row, "candidate_peak_memory_kib") for row in group
+        if row["candidate_success"]
+    ]
+    baseline_peak_memory = [
+        as_float(row, "baseline_peak_memory_kib") for row in group if row["baseline_success"]
+    ]
     absolute_gaps = [
         abs(as_float(row, "candidate_objective_gap_percent")) for row in group
     ]
@@ -137,6 +151,15 @@ def aggregate_summary(scope, value, group):
         "baseline_over_candidate_median": median(speedups),
         "baseline_over_candidate_q25": quantile(speedups, 0.25),
         "baseline_over_candidate_q75": quantile(speedups, 0.75),
+        "candidate_wall_time_median_s": median(candidate_wall_times),
+        "baseline_wall_time_median_s": median(baseline_wall_times),
+        "baseline_over_candidate_wall_median": median(wall_speedups),
+        "baseline_over_candidate_wall_q25": quantile(wall_speedups, 0.25),
+        "baseline_over_candidate_wall_q75": quantile(wall_speedups, 0.75),
+        "candidate_peak_memory_median_kib": median(candidate_peak_memory),
+        "candidate_peak_memory_max_kib": finite_max(candidate_peak_memory),
+        "baseline_peak_memory_median_kib": median(baseline_peak_memory),
+        "baseline_peak_memory_max_kib": finite_max(baseline_peak_memory),
         "candidate_absolute_objective_gap_median_percent": median(absolute_gaps),
         "candidate_absolute_objective_gap_p95_percent": quantile(absolute_gaps, 0.95),
         "candidate_absolute_objective_gap_max_percent": finite_max(absolute_gaps),
@@ -243,6 +266,13 @@ def main():
             if candidate_success and baseline_success and candidate_time > 0.0
             else math.nan
         )
+        candidate_wall_time = as_float(candidate or {}, "wall_time_seconds")
+        baseline_wall_time = as_float(baseline or {}, "wall_time_seconds")
+        wall_speedup = (
+            baseline_wall_time / candidate_wall_time
+            if candidate_success and baseline_success and candidate_wall_time > 0.0
+            else math.nan
+        )
         baseline_objective = as_float(baseline or {}, "objective")
         candidate_objective = as_float(candidate or {}, "objective")
         objective_gap = (
@@ -273,6 +303,11 @@ def main():
             "candidate_time_s": candidate_time,
             "baseline_time_s": baseline_time,
             "baseline_over_candidate": speedup,
+            "candidate_wall_time_s": candidate_wall_time,
+            "baseline_wall_time_s": baseline_wall_time,
+            "baseline_over_candidate_wall": wall_speedup,
+            "candidate_peak_memory_kib": (candidate or {}).get("peak_memory_kib", ""),
+            "baseline_peak_memory_kib": (baseline or {}).get("peak_memory_kib", ""),
             "candidate_objective_gap_percent": objective_gap,
             "candidate_qp_solves": candidate_qp_solves,
             "baseline_qp_solves": baseline_qp_solves,
@@ -314,6 +349,19 @@ def main():
         candidate_times = [as_float(row, "candidate_time_s") for row in group if row["candidate_success"]]
         baseline_times = [as_float(row, "baseline_time_s") for row in group if row["baseline_success"]]
         speedups = [as_float(row, "baseline_over_candidate") for row in group]
+        candidate_wall_times = [
+            as_float(row, "candidate_wall_time_s") for row in group if row["candidate_success"]
+        ]
+        baseline_wall_times = [
+            as_float(row, "baseline_wall_time_s") for row in group if row["baseline_success"]
+        ]
+        wall_speedups = [as_float(row, "baseline_over_candidate_wall") for row in group]
+        candidate_peak_memory = [
+            as_float(row, "candidate_peak_memory_kib") for row in group if row["candidate_success"]
+        ]
+        baseline_peak_memory = [
+            as_float(row, "baseline_peak_memory_kib") for row in group if row["baseline_success"]
+        ]
         objective_gaps = [as_float(row, "candidate_objective_gap_percent") for row in group]
         absolute_gaps = [
             abs(as_float(row, "candidate_objective_gap_percent")) for row in group
@@ -346,6 +394,15 @@ def main():
             "baseline_over_candidate_median": median(speedups),
             "baseline_over_candidate_q25": quantile(speedups, 0.25),
             "baseline_over_candidate_q75": quantile(speedups, 0.75),
+            "candidate_wall_time_median_s": median(candidate_wall_times),
+            "baseline_wall_time_median_s": median(baseline_wall_times),
+            "baseline_over_candidate_wall_median": median(wall_speedups),
+            "baseline_over_candidate_wall_q25": quantile(wall_speedups, 0.25),
+            "baseline_over_candidate_wall_q75": quantile(wall_speedups, 0.75),
+            "candidate_peak_memory_median_kib": median(candidate_peak_memory),
+            "candidate_peak_memory_max_kib": finite_max(candidate_peak_memory),
+            "baseline_peak_memory_median_kib": median(baseline_peak_memory),
+            "baseline_peak_memory_max_kib": finite_max(baseline_peak_memory),
             "candidate_objective_gap_median_percent": median(objective_gaps),
             "candidate_absolute_objective_gap_p95_percent": quantile(absolute_gaps, 0.95),
             "candidate_absolute_objective_gap_max_percent": finite_max(absolute_gaps),

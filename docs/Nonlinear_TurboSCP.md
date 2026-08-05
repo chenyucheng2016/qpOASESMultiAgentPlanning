@@ -121,8 +121,18 @@ batches, residuals, and the frozen collision/SCP/ADMM/merit settings. The
 analysis script reports Wilson success intervals, median and interquartile
 times, work, run-level objective gaps, and timeout-aware method summaries.
 The matrix runner executes one scenario-method pair per process, preserves
-completed rows across restarts, and records timeouts and logs separately.
-The complete scenario matrix can be audited without solving it:
+completed rows across restarts, records timeouts and logs separately, and hashes
+the generated scenario inventory into its immutable run manifest.
+
+The submission-primary matrix uses `n={4,8,12,20}`, `m={0,n,2n}`, homogeneous
+unicycles and balanced heterogeneous agents, and constant-density local
+exchanges. It contains 240 development scenarios and 720 untouched final
+scenarios. The complete primary matrix can be audited without solving it:
+
+`./build-nonlinear/bin/nonlinear_benchmark --suite paper_final --track primary
+--dry-run --output paper_final_inventory.csv`
+
+The broader legacy matrix remains auditable with:
 
 `./build-nonlinear/bin/nonlinear_benchmark --suite development --track all
 --dry-run`

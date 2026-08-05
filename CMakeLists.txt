@@ -337,6 +337,24 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
     )
     set_tests_properties(nonlinear_benchmark_scenario_index PROPERTIES TIMEOUT 30)
     add_test(
+        NAME nonlinear_paper_development_inventory
+        COMMAND nonlinear_benchmark
+            --suite paper_development --track primary --dry-run
+            --output ${CMAKE_BINARY_DIR}/nonlinear_paper_development_inventory.csv
+    )
+    set_tests_properties(nonlinear_paper_development_inventory PROPERTIES
+        TIMEOUT 30
+        PASS_REGULAR_EXPRESSION "generated 240 scenarios")
+    add_test(
+        NAME nonlinear_paper_final_inventory
+        COMMAND nonlinear_benchmark
+            --suite paper_final --track primary --dry-run
+            --output ${CMAKE_BINARY_DIR}/nonlinear_paper_final_inventory.csv
+    )
+    set_tests_properties(nonlinear_paper_final_inventory PROPERTIES
+        TIMEOUT 30
+        PASS_REGULAR_EXPRESSION "generated 720 scenarios")
+    add_test(
         NAME nonlinear_terminal_accuracy_regression
         COMMAND nonlinear_benchmark
             --suite smoke --scenario-index 23 --method full

@@ -108,6 +108,7 @@ def sha256(path):
 
 
 def write_run_manifest(path, arguments, executable, tasks, status_path):
+    inventory = path.parent / "inventory.csv"
     configuration = {
         "protocol_id": arguments.protocol_id,
         "git_commit": arguments.git_commit,
@@ -135,6 +136,9 @@ def write_run_manifest(path, arguments, executable, tasks, status_path):
             for task in tasks
         ],
     }
+    if inventory.is_file():
+        configuration["inventory"] = str(inventory.resolve())
+        configuration["inventory_sha256"] = sha256(inventory)
     if path.exists():
         with path.open(encoding="utf-8") as stream:
             existing = json.load(stream)
@@ -244,9 +248,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("--suite", default="manual",
-                        choices=("manual", "ci", "smoke", "development", "final"))
+                        choices=("manual", "ci", "smoke", "development", "final",
+                                 "paper_development", "paper_final"))
     parser.add_argument("--track", default="all",
-                        choices=("all", "scaling", "models", "families"))
+                        choices=("all", "scaling", "models", "families", "primary"))
     parser.add_argument("--scenario-indices", type=parse_indices, default=(),
                         help="optional comma-separated scenario indices")
     parser.add_argument("--manual-cases", type=parse_manual_cases, default=(),

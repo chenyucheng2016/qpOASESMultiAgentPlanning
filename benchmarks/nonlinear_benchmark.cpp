@@ -145,9 +145,12 @@ bool parseArguments(int argc, char** argv, Arguments& arguments)
         || arguments.suite == "ci"
         || arguments.suite == "development"
         || arguments.suite == "final"
+        || arguments.suite == "paper_development"
+        || arguments.suite == "paper_final"
         || arguments.suite == "manual";
     const bool validTrack = arguments.track == "all" || arguments.track == "scaling"
-        || arguments.track == "models" || arguments.track == "families";
+        || arguments.track == "models" || arguments.track == "families"
+        || arguments.track == "primary";
     return validSuite && validTrack;
 }
 
@@ -155,6 +158,8 @@ std::vector<int> agentCounts(const std::string& suite)
 {
     if (suite == "smoke") return std::vector<int>{2, 4};
     if (suite == "ci") return std::vector<int>{2};
+    if (suite == "paper_development" || suite == "paper_final")
+        return std::vector<int>{4, 8, 12, 20};
     return std::vector<int>{2, 4, 8, 14, 20};
 }
 
@@ -162,6 +167,8 @@ std::vector<int> obstacleCounts(const std::string& suite)
 {
     if (suite == "smoke") return std::vector<int>{0, 4};
     if (suite == "ci") return std::vector<int>{0};
+    if (suite == "paper_development" || suite == "paper_final")
+        return std::vector<int>{0, 4, 8, 12, 16, 20, 24, 40};
     return std::vector<int>{0, 4, 8, 16, 32};
 }
 
@@ -171,6 +178,8 @@ std::vector<int> seeds(const std::string& suite)
     if (suite == "ci") count = 1;
     if (suite == "development") { first = 1000; count = 10; }
     if (suite == "final") { first = 10000; count = 30; }
+    if (suite == "paper_development") { first = 2000; count = 10; }
+    if (suite == "paper_final") { first = 20000; count = 30; }
     std::vector<int> values;
     for (int seed = first; seed < first + count; ++seed) values.push_back(seed);
     return values;
@@ -180,6 +189,8 @@ std::vector<std::string> compositions(const std::string& suite)
 {
     if (suite == "smoke") return std::vector<std::string>{"unicycle", "balanced"};
     if (suite == "ci") return std::vector<std::string>{"unicycle"};
+    if (suite == "paper_development" || suite == "paper_final")
+        return std::vector<std::string>{"unicycle", "balanced"};
     return std::vector<std::string>{"unicycle", "bicycle", "quadcopter", "balanced"};
 }
 
@@ -203,6 +214,8 @@ std::vector<std::string> densityRegimes(const std::string& suite)
 {
     if (suite == "ci" || suite == "smoke")
         return std::vector<std::string>{"fixed"};
+    if (suite == "paper_development" || suite == "paper_final")
+        return std::vector<std::string>{"constant_density"};
     return std::vector<std::string>{"fixed", "constant_density"};
 }
 
@@ -215,6 +228,16 @@ bool includedInTrack(
     const std::string& family)
 {
     if (arguments.suite == "ci" || arguments.suite == "smoke") return true;
+    if (arguments.suite == "paper_development" || arguments.suite == "paper_final")
+    {
+        const bool primary = density == "constant_density"
+            && (composition == "unicycle" || composition == "balanced")
+            && (family == "local_exchange" || family == "local_exchange_obstacles")
+            && (obstacleCount == 0 || obstacleCount == agentCount
+                || obstacleCount == 2 * agentCount);
+        return primary && (arguments.track == "all"
+            || arguments.track == "primary" || arguments.track == "scaling");
+    }
     const bool scaling = composition == "balanced"
         && (family == "antipodal" || family == "random_convex_field"
             || family == "local_exchange" || family == "local_exchange_obstacles");
@@ -783,6 +806,26 @@ void writeHeader(std::ofstream& output)
         "globalization_time_ms\n";
 }
 
+void writeInventoryHeader(std::ofstream& output)
+{
+    output << "scenario_index,case_id,difficulty,family,density,composition,seed,n,m,"
+        "feasibility_witness,horizon,potential_pairs\n";
+}
+
+void writeInventoryRow(
+    std::ofstream& output,
+    std::size_t scenarioIndex,
+    const BenchmarkScenario& scenario)
+{
+    const std::size_t agentCount = scenario.agents.size();
+    const int_t horizon = scenario.agents.empty() ? 0 : scenario.agents.front().horizon;
+    output << scenarioIndex << ',' << scenario.caseId << ',' << scenario.difficulty << ','
+        << scenario.family << ',' << scenario.density << ',' << scenario.composition << ','
+        << scenario.seed << ',' << agentCount << ',' << scenario.obstacles.size() << ','
+        << (scenario.density == "constant_density" ? "local_exchange" : "outer_ring")
+        << ',' << horizon << ',' << agentCount * (agentCount - 1) / 2 << '\n';
+}
+
 void writeScpHeader(std::ofstream& output)
 {
     output << "case_id,method,iteration,qp_solved,qp_status,failed_agent,"
@@ -950,8 +993,8 @@ int main(int argc, char** argv)
     if (!parseArguments(argc, argv, arguments))
     {
         std::fprintf(stderr,
-            "usage: %s [--suite manual|ci|smoke|development|final] [--case id|all] "
-            "[--scenario-index nonnegative_integer] [--track all|scaling|models|families] [--output file.csv] "
+            "usage: %s [--suite manual|ci|smoke|development|final|paper_development|paper_final] [--case id|all] "
+            "[--scenario-index nonnegative_integer] [--track all|scaling|models|families|primary] [--output file.csv] "
             "[--method all|cold|inner|qp_continuation|full|centralized_qpoases|centralized_osqp] "
             "[--threads positive_integer] [--max-scp-iterations positive_integer] "
             "[--fixed-rho] [--exact-admm] "
@@ -973,7 +1016,8 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "cannot open benchmark output: %s\n", arguments.output.c_str());
         return 2;
     }
-    writeHeader(output);
+    if (arguments.dryRun) writeInventoryHeader(output);
+    else writeHeader(output);
     writeScpHeader(traceOutput);
     const std::vector<int> ns = agentCounts(arguments.suite);
     const std::vector<int> ms = obstacleCounts(arguments.suite);
@@ -1002,7 +1046,11 @@ int main(int argc, char** argv)
                 return 1;
             }
             ++generated;
-            if (arguments.dryRun) continue;
+            if (arguments.dryRun)
+            {
+                writeInventoryRow(output, index, scenario);
+                continue;
+            }
             for (std::size_t method = 0; method < selectedMethods.size(); ++method)
                 allSuccessful = runCase(
                     arguments.suite, scenario, selectedMethods[method], arguments.threads,
@@ -1052,7 +1100,11 @@ int main(int argc, char** argv)
                     return 1;
                 }
                 ++scenarioCount;
-                if (arguments.dryRun) continue;
+                if (arguments.dryRun)
+                {
+                    writeInventoryRow(output, currentIndex, scenario);
+                    continue;
+                }
                 for (std::size_t method = 0; method < selectedMethods.size(); ++method)
                     allSuccessful = runCase(
                         arguments.suite, scenario, selectedMethods[method], arguments.threads,

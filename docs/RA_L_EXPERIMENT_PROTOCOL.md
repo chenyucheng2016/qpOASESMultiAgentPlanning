@@ -133,7 +133,22 @@ passes and retains every valid failure.
 
 ## Benchmark matrix
 
-Primary scaling grid:
+The submission-facing primary Monte Carlo grid is intentionally nonredundant:
+
+- agents `n = {4, 8, 12, 20}`;
+- convex polygon obstacles `m in {0, n, 2n}`;
+- homogeneous unicycles and balanced heterogeneous agents;
+- constant-density local exchanges, so the intended interaction degree remains
+  bounded while centralized QP dimensions grow with `n`; and
+- 10 development seeds or 30 untouched final seeds per cell.
+
+This produces exactly 240 `paper_development` scenarios and 720 `paper_final`
+scenarios. `--track primary` selects this grid. Dry-run writes the complete
+scenario inventory, including its index, seed, dimensions, feasibility witness,
+horizon, and potential pair count. The runner hashes that inventory into the run
+manifest before any optimizer is launched.
+
+The earlier breadth grid remains available for exploratory coverage:
 
 - agents `n = {2, 4, 8, 14, 20}`;
 - convex polygon obstacles `m = {0, 4, 8, 16, 32}`;
@@ -178,13 +193,18 @@ analytic outer-ring witness. Random polygons that intersect the witness
 clearance tube are rejected before any compared optimizer is run.
 
 The smoke suite contains 24 unique scenarios. The nonredundant development and
-locked-final track unions contain 680 and 2,040 scenarios, respectively.
+locked-final legacy breadth-track unions contain 680 and 2,040 scenarios,
+respectively. They are supplementary stress suites, not the submission-facing
+primary matrix.
 
 ## Data splits
 
 - Smoke seeds: `0-2`; used by CI and quick local checks.
-- Development seeds: `1000-1009`; parameter tuning is allowed.
-- Final seeds: `10000-10029`; locked until algorithms and parameters freeze.
+- Legacy breadth development seeds: `1000-1009`.
+- Legacy breadth final seeds: `10000-10029`.
+- Paper-primary development seeds: `2000-2009`; parameter tuning is allowed.
+- Paper-primary final seeds: `20000-20029`; locked until algorithms and
+  parameters freeze.
 
 Changing an algorithm or a tuned parameter after inspecting final results
 invalidates affected final runs.
@@ -217,6 +237,15 @@ from WSL with:
 ```bash
 TURBOADMM_GIT_COMMIT=<commit> ./benchmarks/run_ral_deterministic_wsl.sh pilot
 TURBOADMM_GIT_COMMIT=<commit> ./benchmarks/run_ral_deterministic_wsl.sh final
+```
+
+The primary Monte Carlo pilot, development matrix, and immutable final matrix
+are launched with:
+
+```bash
+./benchmarks/run_ral_monte_carlo_wsl.sh pilot
+./benchmarks/run_ral_monte_carlo_wsl.sh development
+./benchmarks/run_ral_monte_carlo_wsl.sh final
 ```
 
 ## Recorded metrics

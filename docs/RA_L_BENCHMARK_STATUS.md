@@ -5,6 +5,35 @@ This is development evidence collected through 2026-08-04. It is not the locked
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
 
+## Revision 10 paper-primary protocol gate
+
+The submission-facing primary Monte Carlo protocol is frozen separately from
+the legacy breadth matrix. It contains 24 cells from `n={4,8,12,20}`,
+`m={0,n,2n}`, homogeneous unicycles and balanced heterogeneous agents, with 10
+development or 30 untouched final seeds per cell. Dry-run emits 240 development
+and 720 final inventory rows, and the runner hashes the inventory into its
+immutable manifest.
+
+The exact-commit one-seed-per-cell WSL pilot at `772e4d5` completed all 48
+TurboADMM-NL/centralized-OSQP processes without timeout or execution error. Both
+methods independently validate on all 24 cases. The maximum absolute Turbo
+objective gap to OSQP is `4.162%`, below the frozen 5% quality gate. Median
+OSQP/Turbo solver-time ratios by scale are:
+
+| Agents | Four paired cells plus obstacle variants | Median OSQP / Turbo |
+|---:|---:|---:|
+| 4 | 6 | 0.73x |
+| 8 | 6 | 1.61x |
+| 12 | 6 | 1.92x |
+| 20 | 6 | 2.41x |
+
+Across valid Turbo rows, maximum terminal error is `0.0506` m, minimum pair
+clearance is `-0.000203` m, minimum obstacle clearance is `0.0237` m, and the
+dynamics defect is numerical zero. The active interaction degree remains one
+and maximum local QP size remains 373 variables, while the centralized problem
+reaches 4,849 variables and 44,762 constraints. This is a protocol/crossover
+gate, not the final 30-seed statistical result.
+
 ## Revision 9 terminal-restoration globalization and CSDO sweep
 
 The candidate shrinks the control trust region after a heavily damped step

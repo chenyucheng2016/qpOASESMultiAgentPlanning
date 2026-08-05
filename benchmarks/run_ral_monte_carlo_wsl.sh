@@ -24,8 +24,8 @@ case "${mode}" in
         protocol_id=ral-monte-carlo-primary-final
         methods=${all_methods}
         scenario_indices=
-        if [[ -n "${METHODS:-}" || -n "${SCENARIO_INDICES:-}" ]]; then
-            echo "final mode does not accept METHODS or SCENARIO_INDICES overrides" >&2
+        if [[ -n "${METHODS:-}" || -n "${SCENARIO_INDICES:-}" || -n "${TIMEOUT_SECONDS:-}" ]]; then
+            echo "final mode does not accept method, scenario, or timeout overrides" >&2
             exit 2
         fi
         ;;
@@ -64,7 +64,7 @@ if [[ "${mode}" == "final" ]]; then
 fi
 
 output_dir=${OUTPUT_DIR:-"${build_dir}/results/${protocol_id}"}
-timeout_seconds=${TIMEOUT_SECONDS:-300}
+timeout_seconds=${TIMEOUT_SECONDS:-120}
 
 cmake -S "${repo_root}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -112,7 +112,8 @@ if [[ -f "${output_dir}/results.csv" ]]; then
             --inventory "${output_dir}/inventory.csv" \
             --execution-status "${output_dir}/execution_status.csv" \
             --pairs-output "${output_dir}/paired_results.csv" \
-            --summary-output "${output_dir}/paired_summary.csv"
+            --summary-output "${output_dir}/paired_summary.csv" \
+            --aggregate-output "${output_dir}/paired_aggregate.csv"
     fi
 fi
 exit "${runner_status}"

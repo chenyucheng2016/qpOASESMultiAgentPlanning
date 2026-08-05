@@ -5,6 +5,65 @@ This is development evidence collected through 2026-08-05. It is not the locked
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
 
+## Revision 12 complete paper-development core
+
+The complete paper-primary development matrix compares TurboADMM-NL with
+centralized OSQP on all 240 frozen development scenarios: 24 cells, ten seeds
+per cell, both compositions, `n={4,8,12,20}`, and `m={0,n,2n}`. All 480 scheduled
+tasks have complete result rows under the 120-second WSL cap. Both methods
+return independently valid trajectories on all 240 scenarios, giving each a
+100% feasible-planning success rate (95% Wilson interval 98.42--100%).
+
+| Agents | Paired cases | Median OSQP / Turbo | Turbo strict | OSQP strict |
+|---:|---:|---:|---:|---:|
+| 4 | 60 | 0.79x | 60/60 | 0/60 |
+| 8 | 60 | 1.39x | 30/60 | 0/60 |
+| 12 | 60 | 1.92x | 58/60 | 0/60 |
+| 20 | 60 | 2.49x | 32/60 | 19/60 |
+
+The all-scale paired median is 1.48x. The primary scaling gates therefore pass:
+Turbo is 1.92x faster at `n=12` and 2.49x faster at `n=20`, while the maximum
+active-agent degree remains one. The obstacle-count aggregation separates the
+source of the crossover:
+
+| Obstacles | Paired cases | Median OSQP / Turbo |
+|---:|---:|---:|
+| 0 | 80 | 1.07x |
+| n | 80 | 1.73x |
+| 2n | 80 | 2.21x |
+
+Absolute Turbo objective gaps relative to OSQP have median `0.953%`, 95th
+percentile `3.463%`, and maximum `4.735%`. Turbo's maximum terminal error is
+`0.0527` m, minimum pair clearance is `-0.000213` m, minimum finite obstacle
+clearance is `0.0181` m, and maximum dynamics defect is numerical zero. Local
+QP size remains at most 373 variables while OSQP reaches 4,849 variables and
+44,762 constraints.
+
+Feasible-planning success is not conflated with strict stationarity. Turbo is
+strictly converged on 180/240 rows (75.0%) versus OSQP on 19/240 (7.9%). The 60
+valid Turbo SCP-limit rows comprise all 30 unicycle `n=8` cases, 28 balanced
+`n=20` cases, and two balanced `n=12` cases. They remain in every success,
+runtime, and objective distribution and must be reported separately in the
+paper.
+
+The raw run is locked to commit
+`386d5346980b7d61e89949dec6e7b8a4b252b1cb`, executable SHA-256
+`aeb33c65d2af5999663dda2fdb20a5aa61b99059d080d5efba22e0680d6a989d`, and
+inventory SHA-256
+`4a1945370b6e68455133e6dd293c943c6699642fdb10e1285d162ae88fdd266e`.
+The normalized execution status, raw results, and aggregate summary have
+SHA-256 values `d205a0bc167c4aa30c50922890876df61e8dc9d0870bf71a075f58cbb18ab05a`,
+`3e0e1f54ffe1c832a6e316335cbf28ecdee5504940b01f329ffb228df1f65fb8`, and
+`6bb2d7e0fc1705ce69745bef23c13191d511e54298a37a5c80f625956cca5a62`,
+respectively.
+
+A host-wrapper termination briefly overlapped a resumed runner on scenario 228.
+The solver output itself contains one valid 63.82-second OSQP row. The original
+status artifact is preserved with SHA-256
+`2a285529ebcfc0bb319bac1b2548651cf82a5272103d679c419a2615d3340264`;
+the normal resume path reconciled the final status without rerunning the solver.
+Subsequent runners use per-attempt temporary filenames to prevent this race.
+
 ## Revision 11 representative all-method gate
 
 Eight preselected paper-development instances exercise both compositions at

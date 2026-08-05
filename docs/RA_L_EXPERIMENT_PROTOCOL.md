@@ -224,12 +224,17 @@ using schedule seed `20260804`; this prevents one method from always occupying
 the same thermal/order position. Report the median, interquartile range, and
 95th percentile. Monte Carlo cells use one execution for each of 30 locked
 seeds and paired seed-wise statistics. Solver-internal time and process wall
-time are both retained. Timeouts remain censored failures at 300 seconds.
+time are both retained. Deterministic runs retain their 300-second cap; the
+paper-primary Monte Carlo pilot, development, and final matrices use a frozen
+120-second cap. Timeouts remain censored failures.
 
 Every run directory contains `run_manifest.json`, including the Git commit,
 executable and runner SHA-256 values, exact solver flags, OpenMP policy,
 timeout, and complete task order. The runner rejects an attempt to resume that
-directory with a different binary, runner, or configuration.
+directory with a different binary, runner, or configuration. Each process
+attempt writes to a unique temporary result path before atomic promotion, so a
+solver orphaned by host termination cannot corrupt a resumed runner's result.
+The paired analyzer emits per-instance, per-cell, and aggregate-by-scale CSVs.
 
 The one-repetition protocol check and locked ten-repetition run are launched
 from WSL with:
@@ -256,7 +261,9 @@ Each run emits one machine-readable row containing:
 - method, solver configuration, and actual thread count;
 - the run manifest separately records the Git commit, executable hash,
   environment policy, and task order;
-- solver success, validator success, status, and failure category;
+- solver success, validator success, strict convergence, status, and failure
+  category, with feasible-planning success and strict convergence reported
+  separately;
 - total wall time and maximum per-agent local-QP time;
 - objective and objective gap to the best feasible centralized solution;
 - minimum pairwise and obstacle clearances;
@@ -282,8 +289,10 @@ ADMM timeout, safety violation, dynamics violation, or terminal violation.
 ## Paper decision gates
 
 1. Correctness: `full` strictly converges on all seven deterministic gates in
-   the OSQP-enabled WSL Release build. Monte Carlo solver and validator failures
-   are reported in the success distribution and are never discarded.
+   the OSQP-enabled WSL Release build. Monte Carlo feasible-planning success and
+   strict convergence are distinct statistics; solver and validator failures
+   are reported in the success distribution and are never discarded. A valid
+   SCP-limit iterate is not relabeled as strictly converged.
 2. Novelty: `full` produces a consistent and practically meaningful reduction
    in time or working-set recalculations relative to `inner` and
    `qp_continuation`, without a worse success rate or objective distribution.

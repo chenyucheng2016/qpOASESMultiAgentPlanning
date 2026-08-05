@@ -322,7 +322,10 @@ def main():
         output_dir / "run_manifest.json", arguments, executable, tasks, status_path)
     for index, (selector, method, repetition, result_path, selector_arguments) in enumerate(tasks, 1):
         key = (selector, method, repetition)
-        partial = result_path.with_suffix(".partial.csv")
+        attempt_token = f"{os.getpid()}.{time.monotonic_ns()}"
+        partial = result_path.with_name(
+            f"{result_path.stem}.{attempt_token}.partial{result_path.suffix}"
+        )
         partial_trace = Path(str(partial) + ".scp.csv")
         final_trace = Path(str(result_path) + ".scp.csv")
         existing = read_single_result(result_path)

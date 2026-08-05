@@ -73,6 +73,12 @@ def summarize(rows):
         converged_count = sum(row.get("converged", "0") == "1" for row in group)
         ci_low, ci_high = wilson_interval(success_count, len(group))
         times = finite(as_float(row, "solve_time_ms") for row in successful)
+        wall_times = finite(
+            1000.0 * as_float(row, "wall_time_seconds") for row in successful
+        )
+        peak_memory = finite(
+            as_float(row, "peak_memory_kib") for row in successful
+        )
         objectives = finite(as_float(row, "objective") for row in successful)
         terminal_errors = finite(
             as_float(row, "maximum_terminal_error") for row in successful
@@ -104,6 +110,12 @@ def summarize(rows):
             "time_q25_ms": quantile(times, 0.25),
             "time_q75_ms": quantile(times, 0.75),
             "time_p95_ms": quantile(times, 0.95),
+            "wall_time_median_ms": statistics.median(wall_times) if wall_times else math.nan,
+            "wall_time_q25_ms": quantile(wall_times, 0.25),
+            "wall_time_q75_ms": quantile(wall_times, 0.75),
+            "wall_time_p95_ms": quantile(wall_times, 0.95),
+            "peak_memory_median_kib": statistics.median(peak_memory) if peak_memory else math.nan,
+            "peak_memory_max_kib": max(peak_memory) if peak_memory else math.nan,
             "objective_median": statistics.median(objectives) if objectives else math.nan,
             "objective_q25": quantile(objectives, 0.25),
             "objective_q75": quantile(objectives, 0.75),
@@ -146,6 +158,10 @@ def summarize_methods(rows, status_rows):
         success_count = len(successful)
         ci_low, ci_high = wilson_interval(success_count, attempted)
         times = finite(as_float(row, "solve_time_ms") for row in successful)
+        wall_times = finite(
+            1000.0 * as_float(row, "wall_time_seconds") for row in successful
+        )
+        peak_memory = finite(as_float(row, "peak_memory_kib") for row in successful)
         output.append({
             "method": method,
             "attempted": attempted,
@@ -161,6 +177,12 @@ def summarize_methods(rows, status_rows):
             "successful_time_median_ms": statistics.median(times) if times else math.nan,
             "successful_time_q25_ms": quantile(times, 0.25),
             "successful_time_q75_ms": quantile(times, 0.75),
+            "successful_wall_time_median_ms": statistics.median(wall_times) if wall_times else math.nan,
+            "successful_wall_time_q25_ms": quantile(wall_times, 0.25),
+            "successful_wall_time_q75_ms": quantile(wall_times, 0.75),
+            "successful_wall_time_p95_ms": quantile(wall_times, 0.95),
+            "successful_peak_memory_median_kib": statistics.median(peak_memory) if peak_memory else math.nan,
+            "successful_peak_memory_max_kib": max(peak_memory) if peak_memory else math.nan,
         })
     return output
 

@@ -126,6 +126,8 @@ def main():
         "run_csdo_turbo_comparison.py")
     summarizer = pathlib.Path(__file__).with_name(
         "summarize_csdo_congested_suite.py")
+    paired_analyzer = pathlib.Path(__file__).with_name(
+        "analyze_csdo_paired_statistics.py")
     ordered_cases = list(cases)
     random.Random(args.schedule_seed).shuffle(ordered_cases)
     tasks = []
@@ -159,6 +161,7 @@ def main():
             "case_runner": file_record(runner),
             "comparison_library": file_record(comparison_library),
             "summarizer": file_record(summarizer),
+            "paired_analyzer": file_record(paired_analyzer),
             "csdo_executable": file_record(args.csdo_executable),
             "turbo_executable": file_record(args.turbo_executable),
             "root_exporter": file_record(args.root_exporter),
@@ -185,9 +188,13 @@ def main():
     noncompleted = []
     for task in tasks:
         task_id = task["task_id"]
-        if task_id in completed_tasks:
+        previous = completed_tasks.get(task_id)
+        if previous and previous.get("state") in ("completed", "recovered"):
             print(f"skipping recorded task {task_id}", flush=True)
             continue
+        if previous:
+            print(f"retrying {previous.get('state', 'failed')} task {task_id}",
+                  flush=True)
         case = task["case"]
         instance = args.manifest.parent / case["instance"]
         work_dir = args.work_root / instance.stem
@@ -259,7 +266,9 @@ def main():
     write_aggregate(args.output_csv, tasks, args.work_root)
     if noncompleted:
         print("recorded non-completed outcomes: " + ", ".join(noncompleted))
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

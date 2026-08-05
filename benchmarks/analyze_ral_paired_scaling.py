@@ -81,6 +81,14 @@ def exact_mcnemar(candidate_only, baseline_only):
     return min(1.0, 2.0 * probability)
 
 
+def speedup_sign_test(values):
+    finite = [value for value in values if math.isfinite(value)]
+    above = sum(value > 1.0 for value in finite)
+    below = sum(value < 1.0 for value in finite)
+    ties = len(finite) - above - below
+    return above, below, ties, exact_mcnemar(above, below)
+
+
 def scenario_key(row):
     return tuple(row[field] for field in SCENARIO_FIELDS)
 
@@ -116,6 +124,8 @@ def aggregate_summary(scope, value, group):
     baseline_peak_memory = [
         as_float(row, "baseline_peak_memory_kib") for row in group if row["baseline_success"]
     ]
+    solver_sign = speedup_sign_test(speedups)
+    wall_sign = speedup_sign_test(wall_speedups)
     absolute_gaps = [
         abs(as_float(row, "candidate_objective_gap_percent")) for row in group
     ]
@@ -151,11 +161,19 @@ def aggregate_summary(scope, value, group):
         "baseline_over_candidate_median": median(speedups),
         "baseline_over_candidate_q25": quantile(speedups, 0.25),
         "baseline_over_candidate_q75": quantile(speedups, 0.75),
+        "solver_speedup_above_one": solver_sign[0],
+        "solver_speedup_below_one": solver_sign[1],
+        "solver_speedup_ties": solver_sign[2],
+        "solver_speedup_exact_sign_p": solver_sign[3],
         "candidate_wall_time_median_s": median(candidate_wall_times),
         "baseline_wall_time_median_s": median(baseline_wall_times),
         "baseline_over_candidate_wall_median": median(wall_speedups),
         "baseline_over_candidate_wall_q25": quantile(wall_speedups, 0.25),
         "baseline_over_candidate_wall_q75": quantile(wall_speedups, 0.75),
+        "wall_speedup_above_one": wall_sign[0],
+        "wall_speedup_below_one": wall_sign[1],
+        "wall_speedup_ties": wall_sign[2],
+        "wall_speedup_exact_sign_p": wall_sign[3],
         "candidate_peak_memory_median_kib": median(candidate_peak_memory),
         "candidate_peak_memory_max_kib": finite_max(candidate_peak_memory),
         "baseline_peak_memory_median_kib": median(baseline_peak_memory),
@@ -362,6 +380,8 @@ def main():
         baseline_peak_memory = [
             as_float(row, "baseline_peak_memory_kib") for row in group if row["baseline_success"]
         ]
+        solver_sign = speedup_sign_test(speedups)
+        wall_sign = speedup_sign_test(wall_speedups)
         objective_gaps = [as_float(row, "candidate_objective_gap_percent") for row in group]
         absolute_gaps = [
             abs(as_float(row, "candidate_objective_gap_percent")) for row in group
@@ -394,11 +414,19 @@ def main():
             "baseline_over_candidate_median": median(speedups),
             "baseline_over_candidate_q25": quantile(speedups, 0.25),
             "baseline_over_candidate_q75": quantile(speedups, 0.75),
+            "solver_speedup_above_one": solver_sign[0],
+            "solver_speedup_below_one": solver_sign[1],
+            "solver_speedup_ties": solver_sign[2],
+            "solver_speedup_exact_sign_p": solver_sign[3],
             "candidate_wall_time_median_s": median(candidate_wall_times),
             "baseline_wall_time_median_s": median(baseline_wall_times),
             "baseline_over_candidate_wall_median": median(wall_speedups),
             "baseline_over_candidate_wall_q25": quantile(wall_speedups, 0.25),
             "baseline_over_candidate_wall_q75": quantile(wall_speedups, 0.75),
+            "wall_speedup_above_one": wall_sign[0],
+            "wall_speedup_below_one": wall_sign[1],
+            "wall_speedup_ties": wall_sign[2],
+            "wall_speedup_exact_sign_p": wall_sign[3],
             "candidate_peak_memory_median_kib": median(candidate_peak_memory),
             "candidate_peak_memory_max_kib": finite_max(candidate_peak_memory),
             "baseline_peak_memory_median_kib": median(baseline_peak_memory),

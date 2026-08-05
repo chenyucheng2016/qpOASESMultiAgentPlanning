@@ -5,6 +5,61 @@ This is development evidence collected through 2026-08-05. It is not the locked
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
 
+## Revision 13 complete continuation ablation
+
+The complete 240-scenario paper-development grid was run with `full`, `inner`,
+and `qp_continuation` under the same interleaved WSL schedule and 120-second
+cap. All 720 tasks completed, and every method returns 240/240 independently
+valid trajectories. The full method strictly converges on 180/240 cases;
+`inner` and `qp_continuation` each strictly converge on 22/240. Valid SCP-limit
+iterates remain distinct from strict convergence in all summaries.
+
+| Variant | Successful median time | Strict convergence |
+|---|---:|---:|
+| full | 2.269 s | 180/240 |
+| inner | 3.228 s | 22/240 |
+| QP continuation | 3.235 s | 22/240 |
+
+Paired baseline/full median time ratios are 1.485x for `inner` and 1.515x for
+QP continuation, corresponding to 32.7% and 34.0% median runtime reductions.
+This passes the frozen 20% novelty effect-size gate with success parity.
+Median QP-solve reduction is 38.7% against both baselines. Median working-set
+recalculation reduction is only 16.7%, below the separate 20% target; the
+novelty result therefore rests on runtime, QP count, and convergence behavior,
+not an overstated all-case working-set claim.
+
+| Regime | Inner/full time | QP-cont./full time | QP-solve reduction | WSR reduction |
+|---|---:|---:|---:|---:|
+| all 240 cases | 1.49x | 1.52x | 38.7% | 16.7% |
+| balanced heterogeneous | 1.65x | 1.65x | 59.6% | 56.8% / 53.1% |
+| homogeneous unicycle | 1.13x | 1.13x | 37.3% | 16.7% |
+
+The heterogeneous result is the structurally important one: transporting
+consensus state together with QP active-set state reduces paired runtime by
+about 39% and QP solves by about 60% versus either reduced-continuation
+variant. Homogeneous unicycle runtime benefit is modest and must be shown as
+such rather than generalized across models.
+
+Across both comparisons, the absolute full-method objective gap has median
+`0.767%`, 95th percentile `3.014%`, and maximum `4.218%`. All variants retain
+numerical-zero dynamics defect. Their worst terminal error is below `0.053` m,
+minimum pair clearance is above `-0.000220` m, and minimum finite obstacle
+clearance is above `0.0164` m.
+
+The raw run is locked to commit
+`f0f1da81ed82b1d989e3f58eb0769047aa03d441`, executable SHA-256
+`aeb33c65d2af5999663dda2fdb20a5aa61b99059d080d5efba22e0680d6a989d`,
+runner SHA-256
+`672c02f0dfc35489490f88018b3992ccec080c7d37a44429df4d63bc7ba0af9a`,
+and the same frozen inventory SHA-256
+`4a1945370b6e68455133e6dd293c943c6699642fdb10e1285d162ae88fdd266e`.
+Raw results and normalized execution status have SHA-256 values
+`9bc07191042c32ed41e9182ae512cad780ee940de2499a123491023bf8e3fab7`
+and `e3563375c2ac5093539e6522bb65f4e39d2dd8adc1c32aa632d2634494a42494`.
+The full-versus-inner and full-versus-QP-continuation aggregate CSV hashes are
+`3db5a27acfc96f1be3a5befbad3756e8620845cb614aa1654959dafa6bd66ab2`
+and `6f240a54388aa424268c3301660b4094c7ccc8db1651c4c38eb4119bd25d099a`.
+
 ## Revision 12 complete paper-development core
 
 The complete paper-primary development matrix compares TurboADMM-NL with

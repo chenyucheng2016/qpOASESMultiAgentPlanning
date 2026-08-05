@@ -52,6 +52,12 @@ def finite_max(values):
     return max(finite) if finite else math.nan
 
 
+def percent_reduction(candidate, baseline):
+    if not math.isfinite(candidate) or not math.isfinite(baseline) or baseline <= 0.0:
+        return math.nan
+    return 100.0 * (baseline - candidate) / baseline
+
+
 def wilson_interval(successes, count, z=1.959963984540054):
     if count == 0:
         return math.nan, math.nan
@@ -99,6 +105,12 @@ def aggregate_summary(scope, value, group):
     absolute_gaps = [
         abs(as_float(row, "candidate_objective_gap_percent")) for row in group
     ]
+    qp_solve_reductions = [
+        as_float(row, "candidate_qp_solve_reduction_percent") for row in group
+    ]
+    working_set_reductions = [
+        as_float(row, "candidate_working_set_reduction_percent") for row in group
+    ]
     return {
         "scope": scope,
         "value": value,
@@ -128,6 +140,12 @@ def aggregate_summary(scope, value, group):
         "candidate_absolute_objective_gap_median_percent": median(absolute_gaps),
         "candidate_absolute_objective_gap_p95_percent": quantile(absolute_gaps, 0.95),
         "candidate_absolute_objective_gap_max_percent": finite_max(absolute_gaps),
+        "candidate_qp_solve_reduction_median_percent": median(qp_solve_reductions),
+        "candidate_qp_solve_reduction_q25_percent": quantile(qp_solve_reductions, 0.25),
+        "candidate_qp_solve_reduction_q75_percent": quantile(qp_solve_reductions, 0.75),
+        "candidate_working_set_reduction_median_percent": median(working_set_reductions),
+        "candidate_working_set_reduction_q25_percent": quantile(working_set_reductions, 0.25),
+        "candidate_working_set_reduction_q75_percent": quantile(working_set_reductions, 0.75),
         "candidate_maximum_terminal_error": finite_max(
             as_float(row, "candidate_terminal_error") for row in group
             if row["candidate_success"]
@@ -232,6 +250,14 @@ def main():
             if candidate_success and baseline_success and baseline_objective != 0.0
             else math.nan
         )
+        candidate_qp_solves = as_float(candidate or {}, "qp_solves")
+        baseline_qp_solves = as_float(baseline or {}, "qp_solves")
+        candidate_working_sets = as_float(candidate or {}, "qp_working_set_recalculations")
+        baseline_working_sets = as_float(baseline or {}, "qp_working_set_recalculations")
+        qp_solve_reduction = percent_reduction(candidate_qp_solves, baseline_qp_solves)
+        working_set_reduction = percent_reduction(
+            candidate_working_sets, baseline_working_sets
+        )
         paired_rows.append({
             "selector": selector,
             **{field: metadata[field] for field in SCENARIO_FIELDS},
@@ -248,6 +274,12 @@ def main():
             "baseline_time_s": baseline_time,
             "baseline_over_candidate": speedup,
             "candidate_objective_gap_percent": objective_gap,
+            "candidate_qp_solves": candidate_qp_solves,
+            "baseline_qp_solves": baseline_qp_solves,
+            "candidate_qp_solve_reduction_percent": qp_solve_reduction,
+            "candidate_working_set_recalculations": candidate_working_sets,
+            "baseline_working_set_recalculations": baseline_working_sets,
+            "candidate_working_set_reduction_percent": working_set_reduction,
             "candidate_active_pairs": (candidate or {}).get("maximum_active_pairs", ""),
             "candidate_potential_pairs": (candidate or {}).get("maximum_potential_pairs", ""),
             "candidate_maximum_agent_degree": (candidate or {}).get("maximum_agent_degree", ""),

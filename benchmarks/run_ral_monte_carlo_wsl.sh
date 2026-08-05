@@ -12,18 +12,21 @@ case "${mode}" in
         protocol_id=ral-monte-carlo-primary-pilot
         methods=${METHODS:-full,centralized_osqp}
         scenario_indices=${SCENARIO_INDICES:-0,10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230}
+        expected_pairs=24
         ;;
     development)
         suite=paper_development
         protocol_id=ral-monte-carlo-primary-development
         methods=${METHODS:-${all_methods}}
         scenario_indices=${SCENARIO_INDICES:-}
+        expected_pairs=240
         ;;
     final)
         suite=paper_final
         protocol_id=ral-monte-carlo-primary-final
         methods=${all_methods}
         scenario_indices=
+        expected_pairs=720
         if [[ -n "${METHODS:-}" || -n "${SCENARIO_INDICES:-}" || -n "${TIMEOUT_SECONDS:-}" ]]; then
             echo "final mode does not accept method, scenario, or timeout overrides" >&2
             exit 2
@@ -63,6 +66,10 @@ if [[ "${mode}" == "final" ]]; then
     fi
 fi
 
+if [[ -n "${scenario_indices}" ]]; then
+    IFS=',' read -r -a selected_indices <<< "${scenario_indices}"
+    expected_pairs=${#selected_indices[@]}
+fi
 output_dir=${OUTPUT_DIR:-"${build_dir}/results/${protocol_id}"}
 timeout_seconds=${TIMEOUT_SECONDS:-120}
 
@@ -82,6 +89,7 @@ if [[ -n "${scenario_indices}" ]]; then
     index_arguments=(--scenario-indices "${scenario_indices}")
 fi
 
+gate_status=0
 runner_status=0
 python3 "${repo_root}/benchmarks/run_nonlinear_matrix.py" \
     "${build_dir}/bin/nonlinear_benchmark" \
@@ -114,6 +122,13 @@ if [[ -f "${output_dir}/results.csv" ]]; then
             --pairs-output "${output_dir}/paired_results.csv" \
             --summary-output "${output_dir}/paired_summary.csv" \
             --aggregate-output "${output_dir}/paired_aggregate.csv"
+        python3 "${repo_root}/benchmarks/check_ral_primary_gate.py" \
+            "${output_dir}/paired_results.csv" \
+            --expected-pairs "${expected_pairs}" \
+            --maximum-absolute-objective-gap-percent 5.0 || gate_status=$?
     fi
+fi
+if [[ "${gate_status}" -ne 0 ]]; then
+    exit "${gate_status}"
 fi
 exit "${runner_status}"

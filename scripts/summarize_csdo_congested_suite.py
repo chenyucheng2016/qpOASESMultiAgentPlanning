@@ -138,10 +138,14 @@ def main():
             "turbo_wall_time": case_result.get("turbo_wall_time"),
             "paired_outcome": paired_outcome(csdo_valid, turbo_valid),
             "pbs_success": metadata.get("pbs_success"),
-            "warmstart_source": metadata.get("warmstart_source"),
-            "root_conflicting_pairs": metadata.get("root_conflicting_pairs"),
-            "warmstart_conflicting_pairs": metadata.get(
-                "warmstart_conflicting_pairs"),
+            "warmstart_source": case_result.get(
+                "warmstart_source") or metadata.get("warmstart_source"),
+            "root_conflicting_pairs": case_result.get(
+                "root_conflicting_pairs",
+                metadata.get("root_conflicting_pairs")),
+            "warmstart_conflicting_pairs": case_result.get(
+                "warmstart_conflicting_pairs",
+                metadata.get("warmstart_conflicting_pairs")),
             "csdo_output": csdo_metrics is not None,
             "csdo_valid": csdo_valid,
             "turbo_output": turbo_metrics is not None,

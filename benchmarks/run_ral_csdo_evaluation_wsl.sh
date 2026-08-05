@@ -15,7 +15,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
 case_manifest="benchmarks/instances/csdo/passing_bay_sweep/evaluation_manifest.csv"
-result_root="build-ral-wsl/results/csdo_ral/evaluation_passing_bay_v1"
+result_root="build-ral-wsl/results/csdo_ral/evaluation_passing_bay_${git_commit:0:7}"
 result_csv="${result_root}/results.csv"
 work_root="${result_root}/cases"
 csdo_root="../CSDOTrajectoryPlanning"
@@ -45,3 +45,6 @@ python3 scripts/summarize_csdo_congested_suite.py \
   --status-csv "${result_root}/results_status.csv" \
   --results-csv "${result_csv}" \
   --output-csv "${result_root}/summary.csv"
+python3 scripts/analyze_csdo_paired_statistics.py \
+  "${result_root}/summary.csv" \
+  --output "${result_root}/paired_statistics.csv"

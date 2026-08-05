@@ -20,17 +20,35 @@ case "${mode}" in
         ;;
 esac
 
-git_commit=${TURBOADMM_GIT_COMMIT:-unknown}
-if [[ "${git_commit}" == "unknown" ]]; then
-    git_commit=$(git -C "${repo_root}" rev-parse HEAD 2>/dev/null || true)
+if [[ -f "${repo_root}/.git" ]]; then
+    git_dir=$(sed -n 's/^gitdir: //p' "${repo_root}/.git")
+    if [[ "${git_dir}" =~ ^([A-Za-z]):/(.*)$ ]]; then
+        drive=${BASH_REMATCH[1],,}
+        git_dir="/mnt/${drive}/${BASH_REMATCH[2]}"
+    elif [[ "${git_dir}" != /* ]]; then
+        git_dir="${repo_root}/${git_dir}"
+    fi
+    git_command=(git --git-dir="${git_dir}" --work-tree="${repo_root}")
+else
+    git_command=(git -c "safe.directory=${repo_root}" -C "${repo_root}")
 fi
-if [[ "${mode}" == "final" && -z "${git_commit}" ]]; then
-    echo "set TURBOADMM_GIT_COMMIT before a final run" >&2
+git_commit=$("${git_command[@]}" rev-parse HEAD 2>/dev/null || true)
+if [[ -z "${git_commit}" ]]; then
+    echo "cannot determine the TurboADMM-NL Git commit" >&2
     exit 2
 fi
-git_commit=${git_commit:-unknown}
+if [[ -n "${TURBOADMM_GIT_COMMIT:-}" && "${TURBOADMM_GIT_COMMIT}" != "${git_commit}" ]]; then
+    echo "TURBOADMM_GIT_COMMIT does not match HEAD" >&2
+    exit 2
+fi
+if [[ "${mode}" == "final" ]]; then
+    if [[ -n "$("${git_command[@]}" status --porcelain --untracked-files=no)" ]]; then
+        echo "final mode requires a clean tracked worktree" >&2
+        exit 2
+    fi
+fi
 
-output_dir=${OUTPUT_DIR:-"${build_dir}/results/${protocol_id}"}
+output_dir=${OUTPUT_DIR:-"${build_dir}/results/${protocol_id}-${git_commit:0:7}"}
 cases=easy_open,easy_single_blocker,medium_doorway,hard_heterogeneous_doorway,hard_warehouse,very_hard_maze
 methods=full,centralized_osqp,centralized_qpoases,qp_continuation,inner,cold
 
@@ -44,6 +62,7 @@ cmake -S "${repo_root}" -B "${build_dir}" \
 cmake --build "${build_dir}" -j "$(nproc)"
 (cd "${build_dir}" && ctest --output-on-failure)
 
+gate_status=0
 runner_status=0
 python3 "${repo_root}/benchmarks/run_nonlinear_matrix.py" \
     "${build_dir}/bin/nonlinear_benchmark" \
@@ -65,4 +84,12 @@ python3 "${repo_root}/benchmarks/analyze_nonlinear_benchmark.py" \
     --summary "${output_dir}/summary.csv" \
     --enriched "${output_dir}/enriched.csv" \
     --method-summary "${output_dir}/method_summary.csv"
+python3 "${repo_root}/benchmarks/check_ral_deterministic_gate.py" \
+    "${output_dir}/results.csv" \
+    --cases "${cases}" \
+    --repetitions "${repetitions}" \
+    --maximum-absolute-objective-gap-percent 5.0 || gate_status=$?
+if [[ "${gate_status}" -ne 0 ]]; then
+    exit "${gate_status}"
+fi
 exit "${runner_status}"

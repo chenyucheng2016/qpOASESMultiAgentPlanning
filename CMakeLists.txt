@@ -300,6 +300,15 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
                 --corridor ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_corridors.yaml
                 --output ${CMAKE_BINARY_DIR}/csdo_smoke_result.yaml
         )
+        add_test(
+            NAME csdo_turbo_bridge_horizon_normalization
+            COMMAND csdo_turbo_comparison
+                --input ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_input.yaml
+                --guess ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_guesses.yaml
+                --corridor ${CMAKE_SOURCE_DIR}/tests/data/csdo_smoke_corridors.yaml
+                --output ${CMAKE_BINARY_DIR}/csdo_horizon_result.yaml
+                --minimum-horizon 4
+        )
     endif()
     ADD_EXECUTABLE(test_nonlinear_continuation tests/test_nonlinear_continuation.cpp)
     TARGET_LINK_LIBRARIES(test_nonlinear_continuation qpOASES)

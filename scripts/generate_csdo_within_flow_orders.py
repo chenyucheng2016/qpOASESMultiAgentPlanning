@@ -32,12 +32,15 @@ def main():
                 original_obstacles(),
             )
             rows.append((case, "-".join(map(str, order)), filename, 5,
-                         "recovery"))
+                         "recovery", "auto", 81))
             case += 1
     with (args.output_dir / "within_flow_manifest.csv").open(
             "w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(("case", "order", "instance", "agents", "mode"))
+        writer.writerow((
+            "case", "order", "instance", "agents", "mode",
+            "warmstart_policy", "minimum_horizon",
+        ))
         writer.writerows(rows)
 
 

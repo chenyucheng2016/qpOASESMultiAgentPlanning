@@ -24,7 +24,12 @@ def parse_args():
     parser.add_argument("--protocol-id", required=True)
     parser.add_argument("--git-commit", required=True)
     parser.add_argument("--schedule-seed", type=int, default=20260804)
+    parser.add_argument(
+        "--warmstart-policy",
+        choices=("auto", "pbs_root", "independent"),
+        default="auto")
     parser.add_argument("--corridor-recovery-window", type=int, default=0)
+    parser.add_argument("--minimum-horizon", type=int, default=0)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
@@ -126,12 +131,18 @@ def main():
     tasks = []
     for sequence, case in enumerate(ordered_cases):
         instance = args.manifest.parent / case["instance"]
+        warmstart_policy = (
+            case.get("warmstart_policy") or args.warmstart_policy)
+        minimum_horizon = int(
+            case.get("minimum_horizon") or args.minimum_horizon)
         tasks.append({
             "task_id": case["instance"],
             "sequence": sequence,
             "instance": file_record(instance),
             "case": case,
             "threads": max(1, int(case["agents"]) // 2),
+            "warmstart_policy": warmstart_policy,
+            "minimum_horizon": minimum_horizon,
         })
     manifest_value = {
         "schema_version": 1,
@@ -140,6 +151,8 @@ def main():
         "schedule_seed": args.schedule_seed,
         "timeout_s": args.timeout,
         "corridor_recovery_window": args.corridor_recovery_window,
+        "warmstart_policy": args.warmstart_policy,
+        "minimum_horizon": args.minimum_horizon,
         "files": {
             "case_manifest": file_record(args.manifest),
             "suite_runner": file_record(pathlib.Path(__file__)),
@@ -165,7 +178,8 @@ def main():
 
     status_fields = (
         "task_id", "sequence", "instance", "family", "mode", "agents",
-        "threads", "state", "runner_return_code", "elapsed_s",
+        "threads", "warmstart_policy", "minimum_horizon", "state",
+        "runner_return_code", "elapsed_s",
     )
     completed_tasks = load_statuses(status_csv)
     noncompleted = []
@@ -188,6 +202,8 @@ def main():
                 "mode": case["mode"],
                 "agents": case["agents"],
                 "threads": task["threads"],
+                "warmstart_policy": task["warmstart_policy"],
+                "minimum_horizon": task["minimum_horizon"],
                 "state": "recovered",
                 "runner_return_code": 0,
                 "elapsed_s": "",
@@ -207,6 +223,9 @@ def main():
             "--work-dir", str(work_dir),
             "--output-csv", str(case_result),
             "--threads", str(task["threads"]),
+            "--warmstart-policy", task["warmstart_policy"],
+            "--minimum-horizon",
+            str(task["minimum_horizon"]),
             "--corridor-recovery-window",
             str(args.corridor_recovery_window),
             "--timeout", str(args.timeout),
@@ -228,6 +247,8 @@ def main():
             "mode": case["mode"],
             "agents": case["agents"],
             "threads": task["threads"],
+            "warmstart_policy": task["warmstart_policy"],
+            "minimum_horizon": task["minimum_horizon"],
             "state": state,
             "runner_return_code": completed.returncode,
             "elapsed_s": f"{elapsed:.9f}",

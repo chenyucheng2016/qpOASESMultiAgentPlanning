@@ -24,12 +24,17 @@ def parse_args():
     parser.add_argument("--work-dir", required=True, type=pathlib.Path)
     parser.add_argument("--output-csv", required=True, type=pathlib.Path)
     parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument(
+        "--warmstart-policy",
+        choices=("auto", "pbs_root", "independent"),
+        default="auto")
     parser.add_argument("--pad-stages", type=int, default=0)
     parser.add_argument("--delay-from-agent", type=int, default=-1)
     parser.add_argument("--delay-stages", type=int, default=0)
     parser.add_argument("--sequential-delay-stages", type=int, default=0)
     parser.add_argument("--independent", action="store_true")
     parser.add_argument("--corridor-recovery-window", type=int, default=0)
+    parser.add_argument("--minimum-horizon", type=int, default=0)
     parser.add_argument("--timeout", type=float, default=7200.0)
     return parser.parse_args()
 
@@ -136,8 +141,12 @@ def main():
                  args.work_dir / "turbo_primary.log"):
         if path.exists():
             path.unlink()
+    warmstart_policy = (
+        "independent" if args.independent else args.warmstart_policy)
     if args.corridor_recovery_window < 0:
         raise RuntimeError("corridor recovery window must be nonnegative")
+    if args.minimum_horizon < 0:
+        raise RuntimeError("minimum horizon must be nonnegative")
 
     csdo_command = [
         str(args.csdo_executable.resolve()),
@@ -174,8 +183,10 @@ def main():
             str(args.sequential_delay_stages),
             "--time-limit", str(args.timeout), "--screen", "1",
         ]
-        if args.independent:
+        if warmstart_policy == "independent":
             exporter_command.append("--independent")
+        elif warmstart_policy == "pbs_root":
+            exporter_command.append("--root")
         export_code, export_wall, export_log = run(
             exporter_command, args.root_exporter.resolve().parent, args.timeout)
         (args.work_dir / "root_exporter.log").write_text(
@@ -217,6 +228,7 @@ def main():
         "--corridor", str(corridor_path.resolve()),
         "--output", str(turbo_output),
         "--threads", str(args.threads),
+        "--minimum-horizon", str(args.minimum_horizon),
     ]
     turbo_code, turbo_wall, turbo_log = run(
         turbo_command, args.turbo_executable.resolve().parent, args.timeout)
@@ -261,6 +273,10 @@ def main():
     row = {
         "mode": args.mode,
         "instance": instance.name,
+        "warmstart_policy": warmstart_policy,
+        "minimum_horizon": args.minimum_horizon,
+        "input_horizon": metadata.get("horizon"),
+        "normalized_horizon": args.minimum_horizon,
         "pbs_success": metadata.get("pbs_success"),
         "warmstart_source": metadata.get("warmstart_source"),
         "root_conflicting_pairs": metadata.get("root_conflicting_pairs"),
@@ -277,6 +293,11 @@ def main():
         "turbo_recovery_used": turbo_recovery_used,
         "turbo_corridor_recovery_window": args.corridor_recovery_window,
     }
+    if turbo_result:
+        turbo_statistics = turbo_result.get("statistics", {})
+        row["input_horizon"] = turbo_statistics.get("input_horizon")
+        row["normalized_horizon"] = turbo_statistics.get(
+            "normalized_horizon")
     metric_template = interaction_metrics(instance_data, guess, guess)
     if turbo_output_available:
         turbo_metrics = interaction_metrics(instance_data, guess, turbo_result)

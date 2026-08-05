@@ -27,7 +27,8 @@ struct Arguments
     std::string output;
     int_t threads;
     int_t corridorWindow;
-    Arguments() : threads(0), corridorWindow(0) {}
+    int_t minimumHorizon;
+    Arguments() : threads(0), corridorWindow(0), minimumHorizon(0) {}
 };
 
 struct CsdoGeometry
@@ -58,6 +59,9 @@ Arguments parseArguments(int argc, char* argv[])
         else if (option == "--corridor-window" && index + 1 < argc)
             arguments.corridorWindow =
                 static_cast<int_t>(std::atoi(argv[++index]));
+        else if (option == "--minimum-horizon" && index + 1 < argc)
+            arguments.minimumHorizon =
+                static_cast<int_t>(std::atoi(argv[++index]));
         else
             throw std::runtime_error("unknown or incomplete argument: " + option);
     }
@@ -66,11 +70,14 @@ Arguments parseArguments(int argc, char* argv[])
         throw std::runtime_error(
             "usage: csdo_turbo_comparison --input INSTANCE "
             "--guess CSDO_GUESSES --corridor CSDO_CORRIDORS "
-            "--output RESULT [--threads N] [--corridor-window N]");
+            "--output RESULT [--threads N] [--corridor-window N] "
+            "[--minimum-horizon N]");
     if (arguments.threads < 0)
         throw std::runtime_error("--threads must be nonnegative");
     if (arguments.corridorWindow < 0)
         throw std::runtime_error("--corridor-window must be nonnegative");
+    if (arguments.minimumHorizon < 0)
+        throw std::runtime_error("--minimum-horizon must be nonnegative");
     return arguments;
 }
 
@@ -162,25 +169,29 @@ std::vector<NonlinearAgentProblem> readAgents(
     const YAML::Node& guess,
     const YAML::Node& corridors,
     const FrontSteeringModel& model,
-    int_t corridorWindow)
+    int_t corridorWindow,
+    int_t minimumHorizon)
 {
     const std::vector<std::string> names = agentNames(input);
     const YAML::Node schedule = guess["schedule"];
     if (!schedule || names.empty())
         throw std::runtime_error("CSDO guess has no schedule");
 
-    const std::size_t stateCount = schedule[names[0]].size();
-    if (stateCount < 2)
+    const std::size_t inputStateCount = schedule[names[0]].size();
+    if (inputStateCount < 2)
         throw std::runtime_error("CSDO guess horizon is empty");
+    const std::size_t stateCount = std::max(
+        inputStateCount,
+        static_cast<std::size_t>(minimumHorizon + 1));
     const int_t horizon = static_cast<int_t>(stateCount - 1);
     std::vector<NonlinearAgentProblem> agents(names.size());
     for (std::size_t agent = 0; agent < names.size(); ++agent)
     {
         const YAML::Node nodes = schedule[names[agent]];
         const YAML::Node corridorNodes = corridors[names[agent]];
-        if (nodes.size() != stateCount)
+        if (nodes.size() != inputStateCount)
             throw std::runtime_error("CSDO guesses require a common horizon");
-        if (!corridorNodes || corridorNodes.size() != 2 * stateCount)
+        if (!corridorNodes || corridorNodes.size() != 2 * inputStateCount)
             throw std::runtime_error(
                 "CSDO corridors require front/rear boxes at every state");
         NonlinearAgentProblem& problem = agents[agent];
@@ -191,20 +202,22 @@ std::vector<NonlinearAgentProblem> readAgents(
         problem.initialControls.assign(horizon * 2, 0.0);
         for (int_t stage = 0; stage <= horizon; ++stage)
         {
+            const std::size_t sourceStage = std::min(
+                static_cast<std::size_t>(stage), inputStateCount - 1);
             problem.stateReference[stage * 4] =
-                nodes[stage]["x"].as<real_t>();
+                nodes[sourceStage]["x"].as<real_t>();
             problem.stateReference[stage * 4 + 1] =
-                nodes[stage]["y"].as<real_t>();
+                nodes[sourceStage]["y"].as<real_t>();
             problem.stateReference[stage * 4 + 2] =
-                nodes[stage]["yaw"].as<real_t>();
+                nodes[sourceStage]["yaw"].as<real_t>();
             problem.stateReference[stage * 4 + 3] =
-                nodes[stage]["steer"].as<real_t>() * csdoDegreeToRadian;
-            if (stage < horizon)
+                nodes[sourceStage]["steer"].as<real_t>() * csdoDegreeToRadian;
+            if (stage < horizon && sourceStage + 1 < inputStateCount)
             {
                 problem.initialControls[stage * 2] =
-                    nodes[stage]["v"].as<real_t>();
+                    nodes[sourceStage]["v"].as<real_t>();
                 problem.initialControls[stage * 2 + 1] =
-                    nodes[stage]["omega"].as<real_t>()
+                    nodes[sourceStage]["omega"].as<real_t>()
                     * csdoDegreeToRadian;
             }
         }
@@ -238,7 +251,9 @@ std::vector<NonlinearAgentProblem> readAgents(
         for (std::size_t stage = 0; stage < stateCount; ++stage)
         for (std::size_t circle = 0; circle < 2; ++circle)
         {
-            const YAML::Node box = corridorNodes[2 * stage + circle];
+            const std::size_t corridorStage = std::min(
+                stage, inputStateCount - 1);
+            const YAML::Node box = corridorNodes[2 * corridorStage + circle];
             if (!box.IsSequence() || box.size() != 6)
                 throw std::runtime_error(
                     "CSDO corridor entries must contain nominal x/y and four bounds");
@@ -256,7 +271,8 @@ std::vector<NonlinearAgentProblem> readAgents(
                      source <= lastStage; ++source)
                 {
                     const YAML::Node sourceBox =
-                        corridorNodes[2 * source + circle];
+                        corridorNodes[
+                            2 * std::min(source, inputStateCount - 1) + circle];
                     lower = std::min(lower,
                         sourceBox[2 + 2 * coordinate].as<real_t>());
                     upper = std::max(upper,
@@ -365,7 +381,9 @@ void writeResult(
     const NonlinearValidationResult& validation,
     real_t objective,
     real_t exactObstacleClearance,
-    int_t corridorWindow)
+    int_t corridorWindow,
+    int_t inputHorizon,
+    int_t normalizedHorizon)
 {
     YAML::Emitter output;
     output << YAML::BeginMap;
@@ -397,6 +415,10 @@ void writeResult(
         << validation.maximumTerminalStateError;
     output << YAML::Key << "corridor_temporal_window" << YAML::Value
         << corridorWindow;
+    output << YAML::Key << "input_horizon" << YAML::Value
+        << inputHorizon;
+    output << YAML::Key << "normalized_horizon" << YAML::Value
+        << normalizedHorizon;
     output << YAML::Key << "parallel_threads" << YAML::Value
         << result.statistics.parallelAgentThreads;
     output << YAML::Key << "qp_build_time" << YAML::Value
@@ -523,7 +545,8 @@ int main(int argc, char* argv[])
         FrontSteeringModel model(timeStep, 1.0);
         const std::vector<NonlinearAgentProblem> agents =
             readAgents(
-                input, guess, corridors, model, arguments.corridorWindow);
+                input, guess, corridors, model, arguments.corridorWindow,
+                arguments.minimumHorizon);
 
         NonlinearTurboOptions options;
         options.coordinationMethod = NCM_DISTRIBUTED_ADMM;
@@ -599,14 +622,19 @@ int main(int argc, char* argv[])
         }
         else
             validation.status = "solver returned no complete trajectory set";
+        const std::vector<std::string> names = agentNames(input);
+        const int_t inputHorizon = static_cast<int_t>(
+            guess["schedule"][names.front()].size() - 1);
         writeResult(
             arguments.output,
-            agentNames(input),
+            names,
             result,
             validation,
             objective,
             exactObstacleClearance,
-            arguments.corridorWindow
+            arguments.corridorWindow,
+            inputHorizon,
+            agents.front().horizon
         );
         std::cout << "TurboADMM-NL: " << result.status
             << ", solver " << result.statistics.solveTimeMilliseconds / 1000.0

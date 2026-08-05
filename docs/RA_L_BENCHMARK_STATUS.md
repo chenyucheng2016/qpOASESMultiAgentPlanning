@@ -1,9 +1,39 @@
 # TurboADMM-NL development benchmark status
 
-This is development evidence collected through 2026-08-04. It is not the locked
+This is development evidence collected through 2026-08-05. It is not the locked
 30-seed final-paper experiment. The WSL build used GCC 9.4, OpenMP, and OSQP
 1.x from `/usr/local/lib/libosqp.so`. The archived repeated timing matrices
 below used the same 120 second wall-time cap per scenario-method process.
+
+## Revision 11 representative all-method gate
+
+Eight preselected paper-development instances exercise both compositions at
+the smallest and largest scales and the obstacle-dense intermediate scales.
+All six methods use the same inventory rows, interleaved schedule, WSL build,
+and 120-second process cap. The gate attempted 48 tasks: 43 completed and five
+were timeout-censored, with no execution errors.
+
+| Method | Attempted | Completed | Timeouts | Protocol success | Successful median time |
+|---|---:|---:|---:|---:|---:|
+| TurboADMM-NL (`full`) | 8 | 8 | 0 | 8/8 | 2.750 s |
+| centralized OSQP | 8 | 8 | 0 | 8/8 | 6.649 s |
+| centralized qpOASES | 8 | 4 | 4 | 4/8 | 9.606 s |
+| QP continuation | 8 | 8 | 0 | 8/8 | 3.188 s |
+| inner hotstart only | 8 | 8 | 0 | 8/8 | 3.127 s |
+| cold ADMM | 8 | 7 | 1 | 7/8 | 13.938 s |
+
+All four qpOASES timeouts occur at `n>=12`; cold ADMM times out on the balanced
+`n=20, m=40` case. Turbo and OSQP independently validate on every paired case.
+Turbo is slower on two `n=4` cases, but the OSQP/Turbo ratio is 2.23--3.25x on
+the sampled `n={12,20}` cases. The largest absolute Turbo objective gap is
+`4.162%`. This is a bounded applicability and ablation gate, not a substitute
+for the complete 240-instance development matrix.
+
+The manifest records exact commit `ff1bdc66e40d1026ca3029648734021b1a99c454`,
+executable SHA-256
+`aeb33c65d2af5999663dda2fdb20a5aa61b99059d080d5efba22e0680d6a989d`,
+and inventory SHA-256
+`4a1945370b6e68455133e6dd293c943c6699642fdb10e1285d162ae88fdd266e`.
 
 ## Revision 10 paper-primary protocol gate
 

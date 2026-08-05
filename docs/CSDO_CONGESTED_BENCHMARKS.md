@@ -70,6 +70,13 @@ case-manifest SHA-256
 The paired outcomes are 15 shared successes, 15 Turbo-only successes, zero
 CSDO-only cases, and two failures for both methods. CSDO validates on 15/32
 cases; it validates on none of the 17 common-root PBS-failure cases.
+The exact two-sided McNemar test on the 15 versus zero discordant outcomes gives
+`p = 6.1035e-5`. The 95% Wilson intervals are `79.85--98.27%` for Turbo's
+30/32 success rate and `30.87--63.55%` for CSDO's 15/32 rate. Turbo's 15/17
+PBS-failure recovery rate has a `65.66--96.71%` Wilson interval. These values
+are generated from the authoritative summary by
+`scripts/analyze_csdo_paired_statistics.py`; the machine-readable output is
+`paired_statistics.csv` in the evaluation artifact directory.
 
 Across the 30 valid Turbo outputs, maximum terminal error is `0.946` mm,
 minimum pair clearance is `0.872` mm, minimum exact-obstacle clearance is

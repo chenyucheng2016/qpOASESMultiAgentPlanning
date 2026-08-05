@@ -235,6 +235,12 @@ The predeclared 32-case evaluation passes all four gates. Turbo validates
 point advantage. Among 17 cases where the common PBS/root fails, Turbo validates
 15 (`88.24%`) and CSDO validates none. Paired outcomes are 15 shared, 15
 Turbo-only, zero CSDO-only, and two neither-valid.
+The 15-to-zero discordant split gives an exact two-sided McNemar
+`p = 6.1035e-5`. The 95% Wilson success intervals are `79.85--98.27%` for
+Turbo and `30.87--63.55%` for CSDO. On the 17 PBS/root failures, Turbo's
+15/17 recovery interval is `65.66--96.71%`. The values are reproduced by
+`scripts/analyze_csdo_paired_statistics.py` from the locked summary rather
+than transcribed from a separate statistical package.
 
 Every valid Turbo output passes the unchanged validator: maximum terminal error
 is `0.946` mm, minimum pair and exact-obstacle clearances are `0.872` mm and

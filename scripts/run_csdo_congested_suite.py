@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument("--output-csv", required=True, type=pathlib.Path)
     parser.add_argument("--protocol-id", required=True)
     parser.add_argument("--git-commit", required=True)
+    parser.add_argument("--csdo-source-commit", required=True)
     parser.add_argument("--schedule-seed", type=int, default=20260804)
     parser.add_argument(
         "--warmstart-policy",
@@ -102,6 +103,10 @@ def main():
     args = parse_args()
     status_csv = args.output_csv.with_name(
         f"{args.output_csv.stem}_status.csv")
+    if (len(args.csdo_source_commit) != 40
+            or any(character not in "0123456789abcdef"
+                   for character in args.csdo_source_commit.lower())):
+        raise RuntimeError("--csdo-source-commit must be a full Git object ID")
     run_manifest = args.output_csv.with_name(
         f"{args.output_csv.stem}_manifest.json")
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -149,9 +154,10 @@ def main():
             "minimum_horizon": minimum_horizon,
         })
     manifest_value = {
-        "schema_version": 1,
+        "schema_version": 3,
         "protocol_id": args.protocol_id,
         "git_commit": args.git_commit,
+        "csdo_source_commit": args.csdo_source_commit.lower(),
         "schedule_seed": args.schedule_seed,
         "timeout_s": args.timeout,
         "corridor_recovery_window": args.corridor_recovery_window,

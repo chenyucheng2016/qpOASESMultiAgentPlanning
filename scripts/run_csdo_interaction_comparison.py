@@ -3,6 +3,7 @@
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import pathlib
@@ -47,6 +48,67 @@ def append_row(path, row):
         if not exists:
             writer.writeheader()
         writer.writerow(row)
+
+
+SCHEDULE_FIELDS = ("t", "x", "y", "yaw", "steer", "v", "omega")
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def canonical_schedule(schedule):
+    normalized = {}
+    for name in sorted(schedule):
+        nodes = []
+        for node in schedule[name]:
+            nodes.append({
+                field: (format(float(node[field]), ".17g")
+                        if field in node else None)
+                for field in SCHEDULE_FIELDS
+            })
+        normalized[name] = nodes
+    return json.dumps(
+        normalized, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def schedule_sha256(document):
+    schedule = document.get("schedule") if document else None
+    if not schedule:
+        raise RuntimeError("trajectory artifact has no schedule")
+    return hashlib.sha256(canonical_schedule(schedule)).hexdigest()
+
+
+def compare_schedules(first, second, tolerance=1.0e-9):
+    first_schedule = first.get("schedule") if first else None
+    second_schedule = second.get("schedule") if second else None
+    if not first_schedule or not second_schedule:
+        return False, math.inf
+    if set(first_schedule) != set(second_schedule):
+        return False, math.inf
+    maximum_difference = 0.0
+    for name in first_schedule:
+        first_nodes = first_schedule[name]
+        second_nodes = second_schedule[name]
+        if len(first_nodes) != len(second_nodes):
+            return False, math.inf
+        for first_node, second_node in zip(first_nodes, second_nodes):
+            for field in SCHEDULE_FIELDS:
+                first_has_field = field in first_node
+                second_has_field = field in second_node
+                if first_has_field != second_has_field:
+                    return False, math.inf
+                if not first_has_field:
+                    continue
+                difference = abs(
+                    float(first_node[field]) - float(second_node[field]))
+                maximum_difference = max(maximum_difference, difference)
+    return maximum_difference <= tolerance, maximum_difference
 
 
 def interaction_metrics(instance, guess, solution):
@@ -153,7 +215,7 @@ def main():
         "--input", str(instance),
         "--output", str(csdo_output),
         "--initial_guess", "--corridor", "--screen", "1",
-        "--qp_backend", "osqp", "--timeLimit", str(args.timeout),
+        "--timeLimit", str(args.timeout),
     ]
     csdo_code, csdo_wall, csdo_log = run(
         csdo_command, args.csdo_executable.resolve().parent, args.timeout)
@@ -162,11 +224,19 @@ def main():
     csdo_result = load_yaml(csdo_output) if csdo_output.exists() else None
     csdo_statistics = csdo_result.get("statistics", {}) if csdo_result else {}
     csdo_output_available = bool(
-        csdo_result and csdo_result.get("schedule") and csdo_corridor.exists())
+        csdo_result and csdo_result.get("schedule"))
+    csdo_initial_guess_available = csdo_guess.exists()
     csdo_success = bool(
         csdo_output_available
         and int(csdo_statistics.get("search_status", 0)) > 0
         and int(csdo_statistics.get("solver_status", 0)) == 1)
+    shared_schedule_match = None
+    shared_schedule_max_abs_difference = None
+    csdo_initial_schedule_sha256 = None
+    root_schedule_sha256 = None
+    csdo_initial_guess_sha256 = None
+    root_guess_sha256 = None
+    root_corridor_sha256 = None
 
     if args.mode == "recovery":
         exporter_command = [
@@ -194,19 +264,59 @@ def main():
         if export_code != 0:
             raise RuntimeError("PBS-root export failed; see root_exporter.log")
         metadata = load_yaml(root_metadata)
-        reference_guess_path = root_guess
-        corridor_path = root_corridor
-        if csdo_output_available:
-            guess_path = csdo_output
-            metadata["warmstart_source"] = "csdo_solution_repair"
-            metadata["warmstart_conflicting_pairs"] = None
+        root_document = load_yaml(root_guess)
+        root_guess_sha256 = file_sha256(root_guess)
+        root_corridor_sha256 = file_sha256(root_corridor)
+        root_schedule_sha256 = schedule_sha256(root_document)
+        if (warmstart_policy == "auto"
+                and bool(metadata.get("pbs_success"))):
+            if not csdo_initial_guess_available:
+                raise RuntimeError(
+                    "exporter found a PBS goal but CSDO emitted no initial guess")
+            csdo_initial_document = load_yaml(csdo_guess)
+            csdo_initial_guess_sha256 = file_sha256(csdo_guess)
+            csdo_initial_schedule_sha256 = schedule_sha256(
+                csdo_initial_document)
+            (shared_schedule_match,
+             shared_schedule_max_abs_difference) = compare_schedules(
+                 csdo_initial_document, root_document)
+            if not shared_schedule_match:
+                raise RuntimeError(
+                    "CSDO and reconstructed PBS schedules differ: "
+                    f"maximum absolute difference "
+                    f"{shared_schedule_max_abs_difference}")
+            guess_path = csdo_guess
+            reference_guess_path = csdo_guess
+            corridor_path = root_corridor
+            turbo_guess_artifact = "csdo_initial_guess"
+            turbo_corridor_artifact = (
+                "csdo_initial_corridor_reconstruction")
         else:
+            if (warmstart_policy == "auto"
+                    and csdo_initial_guess_available):
+                raise RuntimeError(
+                    "CSDO and exporter disagree on PBS success")
             guess_path = root_guess
+            reference_guess_path = root_guess
+            corridor_path = root_corridor
+            source = metadata.get("warmstart_source")
+            if source == "pbs_root":
+                turbo_guess_artifact = "pbs_root_guess"
+                turbo_corridor_artifact = "pbs_root_corridor"
+            elif source == "independent_single_agent":
+                turbo_guess_artifact = "independent_single_agent_guess"
+                turbo_corridor_artifact = (
+                    "independent_single_agent_corridor")
+            else:
+                raise RuntimeError(
+                    f"unsupported recovery warm-start source: {source}")
     elif args.mode == "joint_repair":
         if not csdo_output_available:
             raise RuntimeError(
                 "CSDO did not emit a repairable trajectory and corridors")
         guess_path, corridor_path = csdo_output, csdo_corridor
+        turbo_guess_artifact = "csdo_fixed_plane_solution"
+        turbo_corridor_artifact = "csdo_dumped_initial_corridor"
         metadata = {
             "pbs_success": int(csdo_statistics.get("search_status", 0)) > 0,
             "warmstart_source": "csdo_fixed_plane_solution",
@@ -217,9 +327,12 @@ def main():
         reference_guess_path = guess_path
         export_wall = 0.0
     else:
-        if not csdo_success or not csdo_guess.exists() or not csdo_corridor.exists():
+        if (not csdo_success or not csdo_guess.exists()
+                or not csdo_corridor.exists()):
             raise RuntimeError("CSDO did not produce a successful shared front end")
         guess_path, corridor_path = csdo_guess, csdo_corridor
+        turbo_guess_artifact = "csdo_initial_guess"
+        turbo_corridor_artifact = "csdo_dumped_initial_corridor"
         metadata = {
             "pbs_success": True,
             "warmstart_source": "pbs_goal",
@@ -229,6 +342,13 @@ def main():
         }
         reference_guess_path = guess_path
         export_wall = 0.0
+
+    if csdo_guess.exists() and csdo_initial_guess_sha256 is None:
+        csdo_initial_guess_sha256 = file_sha256(csdo_guess)
+        csdo_initial_schedule_sha256 = schedule_sha256(load_yaml(csdo_guess))
+    turbo_guess_sha256 = file_sha256(guess_path)
+    turbo_corridor_sha256 = file_sha256(corridor_path)
+    turbo_schedule_sha256 = schedule_sha256(load_yaml(guess_path))
 
     turbo_command = [
         str(args.turbo_executable.resolve()),
@@ -288,6 +408,21 @@ def main():
         "normalized_horizon": args.minimum_horizon,
         "pbs_success": metadata.get("pbs_success"),
         "warmstart_source": metadata.get("warmstart_source"),
+        "search_seed": metadata.get("search_seed"),
+        "turbo_input_artifact": turbo_guess_artifact,
+        "turbo_guess_artifact": turbo_guess_artifact,
+        "turbo_corridor_artifact": turbo_corridor_artifact,
+        "shared_schedule_match": shared_schedule_match,
+        "shared_schedule_max_abs_difference": (
+            shared_schedule_max_abs_difference),
+        "csdo_initial_guess_sha256": csdo_initial_guess_sha256,
+        "root_guess_sha256": root_guess_sha256,
+        "root_corridor_sha256": root_corridor_sha256,
+        "turbo_guess_sha256": turbo_guess_sha256,
+        "turbo_corridor_sha256": turbo_corridor_sha256,
+        "csdo_initial_schedule_sha256": csdo_initial_schedule_sha256,
+        "root_schedule_sha256": root_schedule_sha256,
+        "turbo_schedule_sha256": turbo_schedule_sha256,
         "root_conflicting_pairs": metadata.get("root_conflicting_pairs"),
         "warmstart_conflicting_pairs": metadata.get("warmstart_conflicting_pairs"),
         "csdo_success": csdo_success,

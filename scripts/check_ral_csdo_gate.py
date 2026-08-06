@@ -58,6 +58,58 @@ def main():
     ]
     if incomplete:
         failures.append(f"{len(incomplete)} suite tasks are incomplete")
+    provenance_mismatches = []
+    for instance, row in zip(instances, cases):
+        pbs_success = row.get("pbs_success", "").strip().lower()
+        guess_artifact = row.get("turbo_guess_artifact")
+        corridor_artifact = row.get("turbo_corridor_artifact")
+        source = row.get("warmstart_source")
+        if row.get("mode") != "recovery" or row.get("search_seed") != "0":
+            provenance_mismatches.append(instance)
+            continue
+        if pbs_success == "true":
+            hashes = (
+                row.get("csdo_initial_schedule_sha256"),
+                row.get("root_schedule_sha256"),
+                row.get("turbo_schedule_sha256"),
+            )
+            valid = (
+                source == "pbs_goal"
+                and guess_artifact == "csdo_initial_guess"
+                and corridor_artifact
+                    == "csdo_initial_corridor_reconstruction"
+                and row.get("shared_schedule_match", "").lower() == "true"
+                and len(set(hashes)) == 1
+                and all(hashes)
+                and row.get("turbo_guess_sha256")
+                    == row.get("csdo_initial_guess_sha256")
+                and row.get("turbo_corridor_sha256")
+                    == row.get("root_corridor_sha256")
+            )
+        elif pbs_success == "false":
+            root_conflicts = as_int(row, "root_conflicting_pairs")
+            warmstart_conflicts = as_int(
+                row, "warmstart_conflicting_pairs")
+            valid = (
+                source == "pbs_root"
+                and guess_artifact == "pbs_root_guess"
+                and corridor_artifact == "pbs_root_corridor"
+                and row.get("turbo_guess_sha256")
+                    == row.get("root_guess_sha256")
+                and row.get("turbo_corridor_sha256")
+                    == row.get("root_corridor_sha256")
+                and row.get("turbo_schedule_sha256")
+                    == row.get("root_schedule_sha256")
+                and bool(row.get("root_schedule_sha256"))
+                and max(root_conflicts, warmstart_conflicts) > 0
+            )
+        else:
+            valid = False
+        if not valid:
+            provenance_mismatches.append(instance)
+    if provenance_mismatches:
+        failures.append(
+            f"{len(provenance_mismatches)} cases fail shared-front-end provenance")
     if len(statistics_rows) != 1:
         failures.append(
             f"expected one paired-statistics row, found {len(statistics_rows)}")

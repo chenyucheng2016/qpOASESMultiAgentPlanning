@@ -79,7 +79,21 @@ def main():
         "turbo_wall_time",
         "paired_outcome",
         "pbs_success",
+        "search_seed",
         "warmstart_source",
+        "turbo_input_artifact",
+        "turbo_guess_artifact",
+        "turbo_corridor_artifact",
+        "shared_schedule_match",
+        "shared_schedule_max_abs_difference",
+        "csdo_initial_guess_sha256",
+        "root_guess_sha256",
+        "root_corridor_sha256",
+        "turbo_guess_sha256",
+        "turbo_corridor_sha256",
+        "csdo_initial_schedule_sha256",
+        "root_schedule_sha256",
+        "turbo_schedule_sha256",
         "root_conflicting_pairs",
         "warmstart_conflicting_pairs",
         "csdo_output",
@@ -106,11 +120,24 @@ def main():
         instance_path = args.manifest.parent / case["instance"]
         work_dir = args.work_root / instance_path.stem
         instance = load_yaml(instance_path)
-        guess_path = work_dir / "root_guesses.yaml"
-        if not guess_path.exists():
-            guess_path = work_dir / "csdo_guesses.yaml"
+        status = statuses.get(instance_path.name, {})
+        case_result = case_results.get(instance_path.name, {})
+        guess_artifact = (case_result.get("turbo_guess_artifact")
+                          or case_result.get("turbo_input_artifact"))
+        guess_files = {
+            "csdo_initial_guess": "csdo_guesses.yaml",
+            "pbs_root_guess": "root_guesses.yaml",
+            "independent_single_agent_guess": "root_guesses.yaml",
+            "csdo_fixed_plane_solution": "csdo.yaml",
+        }
+        guess_filename = guess_files.get(guess_artifact)
+        guess_path = work_dir / (
+            guess_filename or "__missing_provenance__.yaml")
         guess = optional_yaml(guess_path)
         metadata = optional_yaml(work_dir / "root_metadata.yaml") or {}
+        pbs_success = case_result.get("pbs_success")
+        if pbs_success in (None, ""):
+            pbs_success = metadata.get("pbs_success")
         csdo_metrics = solution_metrics(
             instance, guess, work_dir / "csdo.yaml")
         turbo_metrics = solution_metrics(
@@ -119,8 +146,6 @@ def main():
                       if csdo_metrics is not None else False)
         turbo_valid = (independently_valid(turbo_metrics)
                        if turbo_metrics is not None else False)
-        status = statuses.get(instance_path.name, {})
-        case_result = case_results.get(instance_path.name, {})
         row = dict(case)
         row.update({
             "runner_state": status.get("state", "missing"),
@@ -137,9 +162,35 @@ def main():
             "csdo_wall_time": case_result.get("csdo_wall_time"),
             "turbo_wall_time": case_result.get("turbo_wall_time"),
             "paired_outcome": paired_outcome(csdo_valid, turbo_valid),
-            "pbs_success": metadata.get("pbs_success"),
+            "pbs_success": pbs_success,
+            "search_seed": case_result.get(
+                "search_seed", metadata.get("search_seed")),
             "warmstart_source": case_result.get(
                 "warmstart_source") or metadata.get("warmstart_source"),
+            "turbo_input_artifact": case_result.get(
+                "turbo_input_artifact"),
+            "turbo_guess_artifact": case_result.get(
+                "turbo_guess_artifact"),
+            "turbo_corridor_artifact": case_result.get(
+                "turbo_corridor_artifact"),
+            "shared_schedule_match": case_result.get(
+                "shared_schedule_match"),
+            "shared_schedule_max_abs_difference": case_result.get(
+                "shared_schedule_max_abs_difference"),
+            "csdo_initial_guess_sha256": case_result.get(
+                "csdo_initial_guess_sha256"),
+            "root_guess_sha256": case_result.get("root_guess_sha256"),
+            "root_corridor_sha256": case_result.get(
+                "root_corridor_sha256"),
+            "turbo_guess_sha256": case_result.get("turbo_guess_sha256"),
+            "turbo_corridor_sha256": case_result.get(
+                "turbo_corridor_sha256"),
+            "csdo_initial_schedule_sha256": case_result.get(
+                "csdo_initial_schedule_sha256"),
+            "root_schedule_sha256": case_result.get(
+                "root_schedule_sha256"),
+            "turbo_schedule_sha256": case_result.get(
+                "turbo_schedule_sha256"),
             "root_conflicting_pairs": case_result.get(
                 "root_conflicting_pairs",
                 metadata.get("root_conflicting_pairs")),

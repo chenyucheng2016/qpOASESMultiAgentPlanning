@@ -69,6 +69,8 @@ def exact_mcnemar(turbo_only, csdo_only):
 
 def analyze(rows):
     cases = len(rows)
+    if cases == 0:
+        raise ValueError("cannot analyze an empty CSDO summary")
     paired = {(True, True): 0, (True, False): 0,
               (False, True): 0, (False, False): 0}
     pbs_failures = []
@@ -91,6 +93,10 @@ def analyze(rows):
     csdo_recoveries = sum(csdo for _, csdo in pbs_failures)
     recovery_lower, recovery_upper = wilson(
         turbo_recoveries, len(pbs_failures))
+    turbo_recovery_rate = (turbo_recoveries / len(pbs_failures)
+                           if pbs_failures else math.nan)
+    csdo_recovery_rate = (csdo_recoveries / len(pbs_failures)
+                          if pbs_failures else math.nan)
 
     return {
         "cases": cases,
@@ -110,11 +116,11 @@ def analyze(rows):
         "mcnemar_exact_p_value": exact_mcnemar(turbo_only, csdo_only),
         "pbs_failure_cases": len(pbs_failures),
         "turbo_pbs_recoveries": turbo_recoveries,
-        "turbo_pbs_recovery_rate": turbo_recoveries / len(pbs_failures),
+        "turbo_pbs_recovery_rate": turbo_recovery_rate,
         "turbo_pbs_recovery_wilson_lower": recovery_lower,
         "turbo_pbs_recovery_wilson_upper": recovery_upper,
         "csdo_pbs_recoveries": csdo_recoveries,
-        "csdo_pbs_recovery_rate": csdo_recoveries / len(pbs_failures),
+        "csdo_pbs_recovery_rate": csdo_recovery_rate,
     }
 
 

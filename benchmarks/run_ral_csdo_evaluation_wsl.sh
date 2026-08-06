@@ -41,18 +41,21 @@ case_manifest="benchmarks/instances/csdo/passing_bay_sweep/evaluation_manifest.c
 result_root="build-ral-wsl/results/csdo_ral/evaluation_passing_bay_${git_commit:0:7}"
 result_csv="${result_root}/results.csv"
 work_root="${result_root}/cases"
-csdo_root="../CSDOTrajectoryPlanning"
+csdo_commit="0a391dbb17a4713b9c8d29a663a64f43b57df707"
+csdo_source="build-ral-wsl/csdo-official-${csdo_commit:0:7}-src"
+csdo_build="build-ral-wsl/csdo-official-${csdo_commit:0:7}-build"
 
 runner_args=(
   --manifest "${case_manifest}"
-  --csdo-executable "${csdo_root}/build-private-overlay/csdo"
+  --csdo-executable "${csdo_build}/csdo"
   --turbo-executable "build-ral-wsl/bin/csdo_turbo_comparison"
   --root-exporter "build-csdo-frontend-wsl/csdo_root_warmstart_exporter"
-  --csdo-config "${csdo_root}/config.yaml"
+  --csdo-config "${csdo_source}/config.yaml"
   --work-root "${work_root}"
   --output-csv "${result_csv}"
-  --protocol-id "csdo_passing_bay_evaluation_v1"
+  --protocol-id "csdo_passing_bay_evaluation_v3"
   --git-commit "${git_commit}"
+  --csdo-source-commit "${csdo_commit}"
   --schedule-seed 20260805
   --corridor-recovery-window 3
   --timeout 120

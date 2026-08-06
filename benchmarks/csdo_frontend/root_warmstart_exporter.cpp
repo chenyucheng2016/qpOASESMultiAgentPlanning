@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -156,6 +157,7 @@ std::vector<Path> independentPaths(
                     "cannot write isolated-agent instance");
             stream << isolated;
         }
+        std::srand(0);
         Instance instance(filename);
         PBS pbs(instance, 0);
         const bool success = pbs.solve(arguments.timeLimit);
@@ -283,6 +285,7 @@ void dumpMetadata(
         << corridorLegal;
     output << YAML::Key << "agents" << YAML::Value << agents;
     output << YAML::Key << "horizon" << YAML::Value << horizon;
+    output << YAML::Key << "search_seed" << YAML::Value << 0;
     output << YAML::Key << "pad_stages" << YAML::Value << padStages;
     output << YAML::Key << "delay_from_agent" << YAML::Value
         << delayFromAgent;
@@ -309,6 +312,7 @@ int main(int argc, char* argv[])
         Instance instance(arguments.input);
 
         const std::clock_t searchStart = std::clock();
+        std::srand(0);
         PBS pbs(instance, arguments.screen);
         const bool pbsSuccess = pbs.solve(arguments.timeLimit);
         const double searchTime = static_cast<double>(

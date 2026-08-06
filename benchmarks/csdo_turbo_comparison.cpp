@@ -557,7 +557,7 @@ int main(int argc, char* argv[])
         options.useRiccatiWarmStart = true;
         options.parallelAgentSolves = true;
         options.parallelAgentThreads = arguments.threads;
-        options.collisionSamplesPerInterval = 2;
+        options.collisionSamplesPerInterval = 10;
         options.maxScpIterations = 40;
         options.maxAdmmIterations = 100;
         options.polishingAdmmIterations = 300;

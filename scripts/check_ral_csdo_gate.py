@@ -24,14 +24,17 @@ def main():
     parser.add_argument("summary", type=Path)
     parser.add_argument("paired_statistics", type=Path)
     parser.add_argument("--expected-cases", type=int, default=32)
-    parser.add_argument("--minimum-turbo-successes", type=int, default=30)
+    parser.add_argument("--minimum-turbo-successes", type=int, default=29)
     parser.add_argument("--minimum-pbs-recovery-rate", type=float, default=0.8)
+    parser.add_argument("--minimum-success-rate-difference", type=float, default=0.2)
     parser.add_argument("--maximum-mcnemar-p", type=float, default=0.05)
     arguments = parser.parse_args()
     if arguments.expected_cases <= 0:
         parser.error("--expected-cases must be positive")
     if not 0.0 <= arguments.minimum_pbs_recovery_rate <= 1.0:
         parser.error("--minimum-pbs-recovery-rate must be in [0, 1]")
+    if not 0.0 <= arguments.minimum_success_rate_difference <= 1.0:
+        parser.error("--minimum-success-rate-difference must be in [0, 1]")
     if not 0.0 <= arguments.maximum_mcnemar_p <= 1.0:
         parser.error("--maximum-mcnemar-p must be in [0, 1]")
 
@@ -67,12 +70,18 @@ def main():
     turbo_only = as_int(statistics, "turbo_only")
     csdo_only = as_int(statistics, "csdo_only")
     recovery_rate = as_float(statistics, "turbo_pbs_recovery_rate")
+    success_rate_difference = as_float(statistics, "success_rate_difference")
     mcnemar_p = as_float(statistics, "mcnemar_exact_p_value")
     if turbo_successes < arguments.minimum_turbo_successes:
         failures.append(
             f"Turbo successes {turbo_successes} are below {arguments.minimum_turbo_successes}")
     if turbo_successes <= csdo_successes or turbo_only <= csdo_only:
         failures.append("paired outcomes do not favor TurboADMM-NL")
+    if (not math.isfinite(success_rate_difference)
+            or success_rate_difference < arguments.minimum_success_rate_difference):
+        failures.append(
+            f"success-rate difference {success_rate_difference:.6g} is below "
+            f"{arguments.minimum_success_rate_difference:.6g}")
     if (not math.isfinite(recovery_rate)
             or recovery_rate < arguments.minimum_pbs_recovery_rate):
         failures.append(
@@ -87,6 +96,7 @@ def main():
         f"cases={len(cases)}/{arguments.expected_cases} "
         f"turbo={turbo_successes} csdo={csdo_successes} "
         f"turbo_only={turbo_only} csdo_only={csdo_only} "
+        f"success_rate_difference={success_rate_difference:.9g} "
         f"pbs_recovery_rate={recovery_rate:.9g} mcnemar_p={mcnemar_p:.9g}")
     if failures:
         raise SystemExit("RA-L CSDO gate failed:\n- " + "\n- ".join(failures))

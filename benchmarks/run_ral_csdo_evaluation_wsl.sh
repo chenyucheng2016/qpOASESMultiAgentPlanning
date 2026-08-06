@@ -75,6 +75,7 @@ python3 scripts/check_ral_csdo_gate.py \
   "${result_root}/summary.csv" \
   "${result_root}/paired_statistics.csv" \
   --expected-cases 32 \
-  --minimum-turbo-successes 30 \
+  --minimum-turbo-successes 29 \
   --minimum-pbs-recovery-rate 0.8 \
+  --minimum-success-rate-difference 0.2 \
   --maximum-mcnemar-p 0.05

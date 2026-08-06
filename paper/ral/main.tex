@@ -277,6 +277,13 @@ The architecture reuses structure at four distinct boundaries.
 These mechanisms define four controlled ablations: \emph{cold}, \emph{inner},
 \emph{QP continuation}, and \emph{full}. All variants share the same model,
 linearization, cost, initialization, penalty, trust region, and tolerances.
+Continuation changes only the initialization of the local active-set and ADMM
+iterations. Conditioned on convergence of a convexified subproblem, every
+variant therefore satisfies the same primal feasibility and ADMM fixed-point
+conditions; transported pair state neither changes the objective nor removes a
+constraint. Projection of compatible auxiliaries and reset of incompatible
+state preserve this invariant across relinearizations. Nonlinear feasibility is
+then enforced separately by globalization and the independent validator.
 
 \subsection{Globalization and Feasibility Recovery}
 A nonlinear merit line search accepts an SCP candidate only when the true
@@ -344,10 +351,18 @@ untouched final seeds per cell. Constant-density local exchanges provide an
 analytic feasibility witness and are designed to keep active interaction
 degree bounded. This gives 240 development and 720 final scenarios.
 
-For CSDO, both methods receive the same PBS/Hybrid-A* root and exact obstacle
-map. Original CSDO uses its fixed-plane decentralized QP. \method\ uses the
-root as a warm start but retains pair coupling and may widen only the temporal
-corridor under the frozen recovery rule. Development uses 24 passing-bay
+For CSDO, both branches use the untouched, deterministically seeded
+PBS/Hybrid-A* front end. On search success, CSDO's pre-DSQP initial guess is
+passed directly to \method. A clean-source exporter repeats the same seeded
+search, verifies schedule equality to $10^{-9}$, and reconstructs the static
+obstacle corridors before either optimization branch is run.
+Original CSDO then constructs fixed inter-agent separating planes and solves
+independent vehicle QPs; \method\ instead retains negotiable pair coupling. If
+PBS fails, the exporter preserves its genuinely conflicted root and static
+corridors as \method's input while original CSDO reports search failure.
+\method\ may widen only the temporal indexing of the reconstructed static
+corridor under the frozen recovery rule. Every source, executable, schedule,
+and corridor artifact is hashed. Development uses 24 passing-bay
 instances; evaluation uses a disjoint 32-case grid varying bay length, arrival
 offset, and priority order.
 
@@ -377,6 +392,9 @@ passes the predeclared 20\% novelty-effect target on development data; the
 same comparison will be repeated after the convergence fix is frozen.
 
 \subsection{CSDO-Compatible Recovery}
+The values below are pre-provenance development evidence. Protocol v3 must
+reproduce them with recorded shared-front-end provenance before submission.
+
 Table~\ref{tab:csdo} reports every case in the disjoint evaluation grid.
 \method\ validates \TurboCSDOSuccesses\ of \CSDOCases\ cases, versus
 \CSDOSuccesses\ of \CSDOCases\ for original CSDO. The paired outcomes contain
@@ -388,7 +406,7 @@ cases where the common PBS/root search fails, \method\ repairs
 Every success is checked by the same continuous validator.
 
 \begin{table}[t]
-\caption{Frozen paired CSDO evaluation (\CSDOCases\ cases).}
+\caption{Development CSDO evidence (\CSDOCases\ cases; v3 rerun pending).}
 \label{tab:csdo}
 \centering
 \begin{tabular}{lcc}
@@ -404,9 +422,10 @@ Method-only successes & \CSDOOnlyValid & \TurboOnlyValid \\
 \end{tabular}
 \end{table}
 
-This experiment does not support a runtime-win claim: median total \method\
-wall time is \TurboCSDOMedianWallSeconds~s versus \CSDOMedianWallSeconds~s for
-CSDO. CSDO is fast precisely because its
+The recorded times do not have identical scope and do not support a runtime-win
+claim. Median \method\ optimizer-process wall time is
+\TurboCSDOMedianWallSeconds~s; median original-CSDO end-to-end process wall
+time is \CSDOMedianWallSeconds~s. CSDO is fast precisely because its
 searched separating planes eliminate all optimization coupling. The result
 instead isolates the cost and benefit of retaining negotiable boundaries when
 the root is locally conflicted. On shared successes, \method\ reduces arrival
@@ -414,8 +433,9 @@ sum modestly but has a worse smoothness objective; these secondary trade-offs
 are reported rather than folded into a single favorable score.
 
 \subsection{Required Final Evidence}
-Before submission, the frozen solver must pass: (i) all seven deterministic
-strict-convergence tests, (ii) all 240 development strict-convergence rows with
+Before submission, the frozen solver must pass: (i) all six headline
+deterministic tests and the retained heterogeneous-open overhead control,
+(ii) all 240 development strict-convergence rows with
 no objective gap above 5\%, (iii) the continuation novelty gate without loss
 of success, and (iv) one untouched 720-case final run. The final paper tables
 will report success, strict convergence, objective quality, wall and solver

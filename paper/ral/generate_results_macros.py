@@ -90,6 +90,53 @@ def main():
     csdo_summary = read_csv(arguments.csdo_summary)
     if len(csdo_summary) != integer(csdo, "cases"):
         raise ValueError("CSDO summary row count does not match paired statistics")
+    for row in csdo_summary:
+        provenance_valid = (
+            row.get("mode") == "recovery"
+            and row.get("search_seed") == "0")
+        pbs_success = row.get("pbs_success", "").strip().lower()
+        if pbs_success == "true":
+            schedule_hashes = (
+                row.get("csdo_initial_schedule_sha256"),
+                row.get("root_schedule_sha256"),
+                row.get("turbo_schedule_sha256"),
+            )
+            provenance_valid = provenance_valid and (
+                row.get("warmstart_source") == "pbs_goal"
+                and row.get("turbo_guess_artifact")
+                    == "csdo_initial_guess"
+                and row.get("turbo_corridor_artifact")
+                    == "csdo_initial_corridor_reconstruction"
+                and row.get("shared_schedule_match", "").lower() == "true"
+                and len(set(schedule_hashes)) == 1
+                and all(schedule_hashes)
+                and row.get("turbo_guess_sha256")
+                    == row.get("csdo_initial_guess_sha256")
+                and row.get("turbo_corridor_sha256")
+                    == row.get("root_corridor_sha256"))
+        elif pbs_success == "false":
+            root_conflicts = max(
+                integer(row, "root_conflicting_pairs"),
+                integer(row, "warmstart_conflicting_pairs"))
+            provenance_valid = provenance_valid and (
+                row.get("warmstart_source") == "pbs_root"
+                and row.get("turbo_guess_artifact") == "pbs_root_guess"
+                and row.get("turbo_corridor_artifact")
+                    == "pbs_root_corridor"
+                and row.get("turbo_guess_sha256")
+                    == row.get("root_guess_sha256")
+                and row.get("turbo_corridor_sha256")
+                    == row.get("root_corridor_sha256")
+                and row.get("turbo_schedule_sha256")
+                    == row.get("root_schedule_sha256")
+                and bool(row.get("root_schedule_sha256"))
+                and root_conflicts > 0)
+        else:
+            raise ValueError("CSDO summary contains an invalid PBS status")
+        if not provenance_valid:
+            raise ValueError(
+                "CSDO summary does not prove shared-front-end provenance for "
+                f"{row.get('instance', '<unknown>')}")
 
     csdo_walls = [number(row, "csdo_wall_time") for row in csdo_summary]
     turbo_walls = [number(row, "turbo_wall_time") for row in csdo_summary]

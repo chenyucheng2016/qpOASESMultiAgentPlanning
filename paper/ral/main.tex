@@ -11,6 +11,7 @@
 \newcommand{\R}{\mathbb{R}}
 \newcommand{\norm}[1]{\left\lVert #1\right\rVert}
 
+\input{results_macros.tex}
 \title{TurboADMM-NL: Nested Parametric Continuation for Nonlinear
 Heterogeneous Multi-Agent Trajectory Optimization}
 
@@ -357,48 +358,55 @@ offset, and priority order.
 
 \subsection{Development Gates}
 The frozen development evidence establishes the intended crossover but is not
-substituted for the untouched final matrix. On 240 paired scenarios, both
+substituted for the untouched final matrix. On \PrimaryCases\ paired scenarios, both
 \method\ and centralized OSQP return independently valid trajectories. The
-median OSQP/\method\ process-wall ratios are $0.816$, $1.369$, $1.905$, and
-$2.439$ for $N=4,8,12,20$, respectively. Exact paired sign tests favor
+median OSQP/\method\ process-wall ratios are $\WallRatioNFour$,
+$\WallRatioNEight$, $\WallRatioNTwelve$, and $\WallRatioNTwenty$ for
+$N=4,8,12,20$, respectively. Exact paired sign tests favor
 \method\ from $N=8$ onward. The maximum absolute objective gap is below the
 predeclared 5\% gate. The current solver revision must additionally pass all
 240 strict-convergence checks before these results are frozen for submission.
 
-The continuation ablation contains 240 common scenarios for each distributed
-variant. Full continuation reduces median runtime by 32.7\% relative to the
-inner-only variant and by 34.0\% relative to QP continuation, while reducing
-local QP solves by 38.7\%. All three variants return valid trajectories. This
+The continuation ablation contains \AblationCases\ common scenarios for each
+distributed variant. Full continuation reduces median runtime by
+\InnerRuntimeReductionPercent\% relative to the inner-only variant and by
+\QPContinuationRuntimeReductionPercent\% relative to QP continuation, while
+reducing local QP solves by \ContinuationQPReductionPercent\%. All three
+variants return valid trajectories. This
 passes the predeclared 20\% novelty-effect target on development data; the
 same comparison will be repeated after the convergence fix is frozen.
 
 \subsection{CSDO-Compatible Recovery}
 Table~\ref{tab:csdo} reports every case in the disjoint evaluation grid.
-\method\ validates 30 of 32 cases, versus 15 of 32 for original CSDO. The
-paired outcomes contain 15 shared successes, 15 \method-only successes, no
-CSDO-only success, and two joint failures. The exact two-sided McNemar test is
-$p=6.10\times10^{-5}$. Of 17 cases where the common PBS/root search fails,
-\method\ repairs 15 (88.2\%), while CSDO repairs none. Every success is checked
-by the same continuous validator.
+\method\ validates \TurboCSDOSuccesses\ of \CSDOCases\ cases, versus
+\CSDOSuccesses\ of \CSDOCases\ for original CSDO. The paired outcomes contain
+\CSDOBothValid\ shared successes, \TurboOnlyValid\ \method-only successes,
+\CSDOOnlyValid\ CSDO-only successes, and \CSDONeitherValid\ joint failures.
+The exact two-sided McNemar test is $p=\CSDOMcNemarP$. Of \PBSFailureCases\
+cases where the common PBS/root search fails, \method\ repairs
+\TurboPBSRecoveries\ (\TurboPBSRecoveryPercent\%), while CSDO repairs none.
+Every success is checked by the same continuous validator.
 
 \begin{table}[t]
-\caption{Frozen paired CSDO evaluation (32 cases).}
+\caption{Frozen paired CSDO evaluation (\CSDOCases\ cases).}
 \label{tab:csdo}
 \centering
 \begin{tabular}{lcc}
 \toprule
 Metric & CSDO & \method \\
 \midrule
-Independently valid & 15/32 & 30/32 \\
-PBS-failure recovery & 0/17 & 15/17 \\
-Method-only successes & 0 & 15 \\
-95\% Wilson interval & [30.9,63.6]\% & [79.9,98.3]\% \\
+Independently valid & \CSDOSuccesses/\CSDOCases & \TurboCSDOSuccesses/\CSDOCases \\
+PBS-failure recovery & 0/\PBSFailureCases & \TurboPBSRecoveries/\PBSFailureCases \\
+Method-only successes & \CSDOOnlyValid & \TurboOnlyValid \\
+95\% Wilson interval & [\CSDOWilsonLowPercent,\CSDOWilsonHighPercent]\% &
+[\TurboWilsonLowPercent,\TurboWilsonHighPercent]\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 This experiment does not support a runtime-win claim: median total \method\
-wall time is 8.58~s versus 0.099~s for CSDO. CSDO is fast precisely because its
+wall time is \TurboCSDOMedianWallSeconds~s versus \CSDOMedianWallSeconds~s for
+CSDO. CSDO is fast precisely because its
 searched separating planes eliminate all optimization coupling. The result
 instead isolates the cost and benefit of retaining negotiable boundaries when
 the root is locally conflicted. On shared successes, \method\ reduces arrival

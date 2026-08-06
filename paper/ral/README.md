@@ -24,6 +24,23 @@ pdflatex -interaction=nonstopmode -halt-on-error main.tex
 pdflatex -interaction=nonstopmode -halt-on-error main.tex
 ```
 
+Generate `results_macros.tex` from the manifest-locked analysis CSVs before
+building the manuscript. Use `--evidence-stage development` until the untouched
+final split has been executed; change it to `final` only for the frozen final
+artifacts. The generated file records the SHA-256 digest of every input:
+
+```bash
+python generate_results_macros.py \
+  --evidence-stage development \
+  --paired-aggregate <primary>/paired_aggregate.csv \
+  --full-vs-inner <ablation>/full_vs_inner_aggregate.csv \
+  --full-vs-qp-continuation \
+    <ablation>/full_vs_qp_continuation_aggregate.csv \
+  --csdo-statistics <csdo>/paired_statistics.csv \
+  --csdo-summary <csdo>/summary.csv \
+  --output results_macros.tex
+```
+
 Generate the three benchmark figures only from manifest-locked analysis CSVs:
 
 ```bash

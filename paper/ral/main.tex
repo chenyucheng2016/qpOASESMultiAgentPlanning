@@ -1,0 +1,429 @@
+\documentclass[journal]{IEEEtran}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage{multirow}
+
+\newcommand{\method}{TurboADMM-NL}
+\newcommand{\oldmethod}{TurboADMM}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\norm}[1]{\left\lVert #1\right\rVert}
+
+\title{TurboADMM-NL: Nested Parametric Continuation for Nonlinear
+Heterogeneous Multi-Agent Trajectory Optimization}
+
+% Update the complete author list and affiliations before submission.
+\author{Yucheng Chen}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Nonlinear multi-agent trajectory optimization repeatedly solves coupled
+quadratic programs whose temporal dynamics, collision geometry, and active
+constraints evolve gradually. General-purpose centralized solvers do not
+exploit agent separability, while conventional distributed methods repeatedly
+discard useful state at nonlinear relinearization boundaries. This letter
+extends our prior linear-QP solver, TurboADMM, to \method, a shared-memory
+sequential convex programming method for heterogeneous robot teams. The method
+combines per-agent alternating-direction decomposition with four levels of
+structure reuse: affine Riccati initialization, vector hotstarts within each
+ADMM solve, matrix and working-set continuation across nonlinear
+linearizations, and geometry-aware transport of pairwise consensus and dual
+state. A merit line search, trust-region restoration, elastic feasibility
+recovery, and an independent continuous validator prevent continuation from
+weakening nonlinear safety. The same problem may contain unicycles, bicycles,
+and reduced-order three-dimensional quadcopters and convex polygonal
+obstacles. Frozen deterministic and Monte Carlo protocols compare against
+centralized qpOASES and OSQP and isolate each continuation layer. A disjoint
+CSDO-compatible evaluation further tests a complementary property: repairing
+locally conflicted trajectories from a common PBS/Hybrid-A* front end while
+retaining negotiable inter-agent boundaries.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Multi-robot systems, trajectory optimization, distributed optimization,
+sequential convex programming, ADMM.
+\end{IEEEkeywords}
+
+\section{Introduction}
+\label{sec:introduction}
+Multi-robot planning couples long-horizon nonlinear dynamics to pairwise
+collision avoidance. A centralized transcription exposes all decision
+variables and pair constraints to one optimizer. This is robust at small
+scale, but the joint QP grows with the team and ignores the per-agent temporal
+structure. Distributed optimization exposes parallelism, yet its many local QP
+solves can erase that benefit when each solve is initialized independently.
+The challenge becomes sharper inside sequential convex programming (SCP): an
+ADMM loop solves one convexification, after which changed Jacobians and
+separating planes conventionally trigger another cold optimization.
+
+Our prior work \oldmethod~\cite{Chen2026TurboADMM} addressed a single sequence
+of linearly constrained multi-agent QPs. It combined agent-level ADMM,
+Riccati-based primal-dual initialization, and qpOASES active-set hotstarts.
+That architecture reduced local QP work substantially, but it did not address
+nonlinear dynamics, heterogeneous state dimensions, static obstacles, changing
+collision geometry, nonlinear globalization, or recovery from an infeasible
+reference. Merely placing the previous solver inside an SCP loop would discard
+the active-set and consensus structure exactly where the nonlinear solver
+spends most of its work.
+
+This letter introduces \method, a nonlinear extension that treats the nested
+SCP--ADMM iteration as a two-dimensional parametric sequence. At fixed
+linearization, only consensus-dependent QP vectors change. Across SCP
+iterations, dynamics matrices and collision normals change gradually. We reuse
+the appropriate state at both boundaries and reset it only when a measurable
+compatibility test fails. The method is algorithmically distributed but runs
+on one shared-memory machine; it is not a network-distributed control scheme.
+
+The contributions are:
+\begin{itemize}
+    \item A structure-preserving SCP decomposition for teams with mixed
+    nonlinear models, agent-specific dimensions and footprints, convex
+    polygonal obstacles, and inter-knot collision checking.
+    \item Nested parametric continuation that combines Riccati initialization,
+    inner-ADMM vector hotstarts, cross-SCP matrix/working-set continuation, and
+    geometry-aware transport of pairwise auxiliary and scaled-dual state.
+    \item A strict nonlinear recovery mechanism combining exact rollout,
+    merit globalization, cold reliable QP reconstruction, elastic slacks,
+    trust-region contraction, and final fixed-penalty consensus polishing.
+    \item A frozen evaluation protocol with six hand-designed cases, a
+    24-cell Monte Carlo scaling matrix, centralized qpOASES and OSQP baselines,
+    continuation ablations, and a disjoint paired CSDO recovery study.
+\end{itemize}
+
+The novelty is not ADMM, Riccati recursion, active-set hotstarting, or SCP in
+isolation. It is their continuation-aware composition across both levels of a
+nonlinear multi-agent solver, together with evidence that the added reuse
+reduces work without relaxing feasibility or objective-quality gates.
+
+\section{Related Work}
+\label{sec:related}
+Sparse first-order QP solvers such as OSQP~\cite{Stellato2020OSQP} are robust
+general baselines, and parametric active-set solvers such as
+qpOASES~\cite{Ferreau2014qpOASES} can exploit similarity between consecutive
+QPs. Optimal-control solvers exploit block temporal structure, but a
+monolithic multi-agent transcription still exposes growing coupling. Our
+focus is orthogonal: retain separate per-agent optimal-control QPs and move the
+coupling into low-dimensional consensus projections.
+
+ADMM provides a standard mechanism for decomposing convex programs with
+coupling constraints~\cite{Boyd2011ADMM}. Multi-agent variants range from
+physically distributed control and DDP architectures~\cite{Saravanos2023DDP}
+to centralized shared-memory decomposition. The latter is the relevant
+comparison here: communication latency is absent, so performance depends on
+local QP work, parallel scheduling, and the number of consensus rounds.
+\oldmethod~\cite{Chen2026TurboADMM} showed that Riccati initialization and
+parametric active-set hotstarts are complementary for linear multi-agent QPs.
+\method extends that mechanism across nonlinear relinearizations rather than
+claiming a new ADMM splitting.
+
+Sequential convex optimization is widely used to obtain locally optimal
+collision-free trajectories~\cite{Schulman2013TrajOpt}. Its performance and
+robustness depend on the reference homotopy, trust-region policy, and recovery
+from temporarily infeasible convexifications. We preserve a nonlinear merit
+test and independently validate every returned trajectory; a feasible
+SCP-limit iterate is reported separately from strict convergence.
+
+CSDO~\cite{Yang2024CSDO} combines centralized priority-based search (PBS) and
+spatiotemporal Hybrid-A* with decentralized QP refinement. Its separating
+planes and safe corridors are constants derived from the initial guess, so
+each vehicle QP is independent. This makes refinement extremely fast when the
+searched homotopy and assignment of avoidance responsibility are already
+adequate. Our CSDO experiment keeps the same search front end but asks a
+different question: can a coupled optimizer repair a locally conflicted root
+by negotiating pairwise motion rather than accepting fixed mutual boundaries?
+Runtime is therefore secondary in that comparison and is disclosed as a
+non-advantage.
+
+\section{Nonlinear Multi-Agent Problem}
+\label{sec:problem}
+Consider $N$ agents over horizon $H$. Agent $i$ has state
+$x_{i,k}\in\R^{n_i}$, input $u_{i,k}\in\R^{m_i}$, discrete dynamics
+$f_i$, and position output $h_i$. An embedding $E_i$ maps a two- or
+three-dimensional position into the common workspace $\R^d$, where
+$d=\max_i\dim h_i$. The dynamics and position maps are
+\begin{align}
+ x_{i,k+1} &= f_i(x_{i,k},u_{i,k}), \\
+ p_{i,k} &= E_i h_i(x_{i,k}).
+\end{align}
+Each agent has radius $r_i$; ground footprints are discs and aerial footprints
+are spheres. Polygonal obstacles are treated as vertical prisms when $d=3$.
+
+With local stage and terminal costs $\ell_i$ and $\phi_i$, the joint problem is
+\begin{subequations}\label{eq:nlp}
+\begin{align}
+ \min_{x,u}\quad & \sum_{i=1}^N\left[
+ \phi_i(x_{i,H})+\sum_{k=0}^{H-1}\ell_i(x_{i,k},u_{i,k})\right] \\
+ \mathrm{s.t.}\quad
+ &x_{i,k+1}=f_i(x_{i,k},u_{i,k}), \\
+ &(x_{i,k},u_{i,k})\in\mathcal X_{i,k}\times\mathcal U_{i,k}, \\
+ &\norm{p_{i,k}-p_{j,k}}_2\ge r_i+r_j,\quad i<j, \\
+ &\operatorname{dist}(p_{i,k},\mathcal O_q)\ge r_i,
+\end{align}
+\end{subequations}
+together with masked terminal equalities or terminal tolerances. Collision
+constraints are enforced both at knots and interpolated substeps. Problem
+\eqref{eq:nlp} is nonconvex because of the dynamics and reverse-convex
+separation constraints.
+
+The implementation supports the model set in Table~\ref{tab:models}. A single
+problem may mix all three. The quadcopter is deliberately reduced order; a
+full rigid-body torque model is outside the present claim.
+
+\begin{table}[t]
+\caption{Implemented heterogeneous agent models.}
+\label{tab:models}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Model & $n_i$ & $m_i$ & Position \\
+\midrule
+Unicycle & 4 & 2 & $(p_x,p_y)$ \\
+Bicycle & 5 & 2 & $(p_x,p_y)$ \\
+Reduced quadcopter & 9 & 4 & $(p_x,p_y,p_z)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{TurboADMM-NL}
+\label{sec:method}
+
+\subsection{Structure-Preserving Convexification}
+At SCP iteration $s$, let $(\bar x^s,\bar u^s)$ be the nominal trajectory and
+use increments $(\delta x,\delta u)$. Linearized dynamics are
+\begin{equation}
+ \delta x_{i,k+1}=A^s_{i,k}\delta x_{i,k}
+ +B^s_{i,k}\delta u_{i,k}+d^s_{i,k},
+\label{eq:linear-dynamics}
+\end{equation}
+where $A^s_{i,k}$ and $B^s_{i,k}$ are analytic Jacobians and $d^s_{i,k}$ is
+the affine defect. For pair $(i,j)$, define nominal displacement
+$\bar q^s_{ij,k}=\bar p^s_{i,k}-\bar p^s_{j,k}$ and unit normal
+$n^s_{ij,k}=\bar q^s_{ij,k}/\norm{\bar q^s_{ij,k}}_2$. The supporting
+half-space is
+\begin{equation}
+ (n^s_{ij,k})^T\left(J^s_{i,k}\delta x_{i,k}
+ -J^s_{j,k}\delta x_{j,k}\right)
+ \ge r_i+r_j-(n^s_{ij,k})^T\bar q^s_{ij,k}.
+\label{eq:pair-halfspace}
+\end{equation}
+Convex polygon constraints use supporting planes on clearance-inflated
+boundaries. A proximity margin screens inactive pairs and obstacles in the
+constant-density experiments; the nonlinear merit and independent validator
+still evaluate every pair and obstacle.
+
+\subsection{Agent-Level ADMM}
+Collect agent $i$'s increments in $w_i$. The convexified objective and local
+constraints give
+\begin{equation}
+ \min_{w_i\in\mathcal W_i^s}\frac{1}{2}w_i^T H_i^s w_i
+ +(g_i^s)^T w_i,
+\end{equation}
+where $\mathcal W_i^s$ contains \eqref{eq:linear-dynamics}, bounds, terminal
+rows, trust-region rows, and static-obstacle half-spaces. For each active
+pair-stage incidence $e$, a selector $P_{i,e}^s$ exposes the local position
+used by \eqref{eq:pair-halfspace}. Introducing auxiliary positions $z_e$ and
+scaled duals $y_{i,e}$ yields the local ADMM update
+\begin{equation}
+ w_i^{r+1}=\arg\min_{w_i\in\mathcal W_i^s}
+ \frac{1}{2}w_i^T H_i^s w_i+(g_i^s)^T w_i
+ +\frac{\rho}{2}\sum_{e\in\mathcal E_i^s}
+ \norm{P_{i,e}^s w_i-z_{i,e}^r+y_{i,e}^r}_2^2.
+\label{eq:local-qp}
+\end{equation}
+All local QPs are independent and are solved in parallel. The coordinator
+projects each two-agent auxiliary block onto its collision half-space and then
+updates the scaled duals. Thus no centralized coupling QP is solved.
+
+\subsection{Nested Parametric Continuation}
+The architecture reuses structure at four distinct boundaries.
+\begin{enumerate}
+    \item \emph{Riccati initialization.} At the first local solve, an affine,
+    stage-varying LQR recursion produces a dynamics-feasible primal trajectory
+    and equality multipliers in $O(H)$ stage operations. Inequality multipliers
+    begin at zero.
+    \item \emph{Inner vector hotstart.} Within one SCP linearization, the
+    Hessian and constraint matrix of \eqref{eq:local-qp} are fixed while the
+    consensus-dependent gradient and bounds vary. qpOASES reuses the previous
+    primal-dual point and active set.
+    \item \emph{Cross-SCP matrix hotstart.} When $A^s$, $B^s$, obstacle rows,
+    or collision rows change, qpOASES receives the new matrices while retaining
+    the compatible working set and local solution.
+    \item \emph{Geometry-aware consensus transport.} A pair-stage state is
+    transported only if
+    $(n^{s-1}_{ij,k})^Tn^s_{ij,k}\ge\gamma$. Its auxiliary positions are
+    projected onto the new half-space and only the dual component aligned with
+    $n^s_{ij,k}$ is retained. Incompatible states are reset from the nominal
+    trajectory.
+\end{enumerate}
+These mechanisms define four controlled ablations: \emph{cold}, \emph{inner},
+\emph{QP continuation}, and \emph{full}. All variants share the same model,
+linearization, cost, initialization, penalty, trust region, and tolerances.
+
+\subsection{Globalization and Feasibility Recovery}
+A nonlinear merit line search accepts an SCP candidate only when the true
+rollout improves the frozen merit. Full-state references are projected through
+the exact nonlinear dynamics whenever this restores dynamics without violating
+physical safety. If a convex subproblem fails, the solver rebuilds it cold
+with reliable active-set settings. A second fallback introduces nonnegative
+elastic slacks on temporarily infeasible obstacle, corridor, and terminal
+rows, penalized by a fixed exact-penalty weight. Rejected steps roll back to the
+last accepted nonlinear iterate and contract the control trust region.
+
+After the ordinary convergence predicate first holds, a fixed-$\rho$ phase
+polishes consensus with zero relative residual tolerance. Restoration slacks
+must vanish, the QP direction must meet the unchanged SCP step tolerance, and
+the nonlinear trajectory must satisfy pair, obstacle, dynamics, and terminal
+tests before strict convergence is declared.
+
+\subsection{Structural Scaling}
+Let $q_i=O(H(n_i+m_i))$ be one local QP dimension, $\Delta$ the maximum active
+interaction degree, and $P$ the number of worker threads. One ADMM round costs
+approximately
+\begin{equation}
+ O\!\left(\frac{1}{P}\sum_i C_{\mathrm{QP}}(q_i)
+ +H|\mathcal E^s|d\right),
+\end{equation}
+whereas a centralized solver processes dimension $\sum_iq_i$ and all coupling
+rows simultaneously. \method\ does not claim a universal asymptotic bound for
+active-set work. Its intended regime is spatially local interaction, where
+$\Delta$ and local QP dimensions remain bounded while the centralized problem
+continues to grow. The experiments report active degree, QP dimensions, QP
+solves, working-set recalculations, solver time, process wall time, and peak
+memory rather than inferring scalability from runtime alone.
+
+\section{Experimental Protocol}
+\label{sec:protocol}
+All publication runs use the same WSL Release binary and independent nonlinear
+validator. Collision and obstacle clearance are sampled at 20 substeps per
+interval. A run succeeds only if solver execution finishes under the frozen
+cap and the validator accepts pair clearance, obstacle clearance, nonlinear
+dynamics, and terminal constraints. Strict SCP convergence is reported
+separately and is required for every Turbo deterministic and development-gate
+case. Run manifests hash the executable, runner, scenario inventory, method
+order, and OpenMP policy.
+
+\subsection{Comparisons and Ablations}
+The internal comparisons are centralized qpOASES and official OSQP applied to
+the identical SCP QP, plus the cold, inner, QP-continuation, and full
+distributed variants. Deterministic timings use ten fresh processes with
+interleaved method order. Monte Carlo uses paired seeds and reports medians,
+quartiles, Wilson success intervals, exact paired sign tests for crossover,
+and objective gaps on jointly valid outputs. Solver-internal time and process
+wall time are both retained.
+
+\subsection{Scenario Sets}
+The six headline deterministic cases progress from a two-unicycle open
+crossing to a single blocker, a four-agent doorway, a heterogeneous doorway,
+an eight-agent warehouse, and an eight-agent maze. A heterogeneous open case
+remains a regression-only overhead control and is not used as headline
+performance evidence.
+
+The submission-primary Monte Carlo grid contains
+$N\in\{4,8,12,20\}$, obstacle counts $M\in\{0,N,2N\}$, homogeneous
+unicycles and balanced heterogeneous teams, and ten development or thirty
+untouched final seeds per cell. Constant-density local exchanges provide an
+analytic feasibility witness and are designed to keep active interaction
+degree bounded. This gives 240 development and 720 final scenarios.
+
+For CSDO, both methods receive the same PBS/Hybrid-A* root and exact obstacle
+map. Original CSDO uses its fixed-plane decentralized QP. \method\ uses the
+root as a warm start but retains pair coupling and may widen only the temporal
+corridor under the frozen recovery rule. Development uses 24 passing-bay
+instances; evaluation uses a disjoint 32-case grid varying bay length, arrival
+offset, and priority order.
+
+\section{Results}
+\label{sec:results}
+% The primary-final tables are intentionally not populated until the solver is
+% frozen and the untouched 720-case split is executed once.
+
+\subsection{Development Gates}
+The frozen development evidence establishes the intended crossover but is not
+substituted for the untouched final matrix. On 240 paired scenarios, both
+\method\ and centralized OSQP return independently valid trajectories. The
+median OSQP/\method\ process-wall ratios are $0.816$, $1.369$, $1.905$, and
+$2.439$ for $N=4,8,12,20$, respectively. Exact paired sign tests favor
+\method\ from $N=8$ onward. The maximum absolute objective gap is below the
+predeclared 5\% gate. The current solver revision must additionally pass all
+240 strict-convergence checks before these results are frozen for submission.
+
+The continuation ablation contains 240 common scenarios for each distributed
+variant. Full continuation reduces median runtime by 32.7\% relative to the
+inner-only variant and by 34.0\% relative to QP continuation, while reducing
+local QP solves by 38.7\%. All three variants return valid trajectories. This
+passes the predeclared 20\% novelty-effect target on development data; the
+same comparison will be repeated after the convergence fix is frozen.
+
+\subsection{CSDO-Compatible Recovery}
+Table~\ref{tab:csdo} reports every case in the disjoint evaluation grid.
+\method\ validates 30 of 32 cases, versus 15 of 32 for original CSDO. The
+paired outcomes contain 15 shared successes, 15 \method-only successes, no
+CSDO-only success, and two joint failures. The exact two-sided McNemar test is
+$p=6.10\times10^{-5}$. Of 17 cases where the common PBS/root search fails,
+\method\ repairs 15 (88.2\%), while CSDO repairs none. Every success is checked
+by the same continuous validator.
+
+\begin{table}[t]
+\caption{Frozen paired CSDO evaluation (32 cases).}
+\label{tab:csdo}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Metric & CSDO & \method \\
+\midrule
+Independently valid & 15/32 & 30/32 \\
+PBS-failure recovery & 0/17 & 15/17 \\
+Method-only successes & 0 & 15 \\
+95\% Wilson interval & [30.9,63.6]\% & [79.9,98.3]\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This experiment does not support a runtime-win claim: median total \method\
+wall time is 8.58~s versus 0.099~s for CSDO. CSDO is fast precisely because its
+searched separating planes eliminate all optimization coupling. The result
+instead isolates the cost and benefit of retaining negotiable boundaries when
+the root is locally conflicted. On shared successes, \method\ reduces arrival
+sum modestly but has a worse smoothness objective; these secondary trade-offs
+are reported rather than folded into a single favorable score.
+
+\subsection{Required Final Evidence}
+Before submission, the frozen solver must pass: (i) all seven deterministic
+strict-convergence tests, (ii) all 240 development strict-convergence rows with
+no objective gap above 5\%, (iii) the continuation novelty gate without loss
+of success, and (iv) one untouched 720-case final run. The final paper tables
+will report success, strict convergence, objective quality, wall and solver
+time, peak memory, SCP/ADMM work, active degree, and centralized/local QP
+dimensions. No parameter may change after the final split is inspected.
+
+\section{Limitations}
+\label{sec:limitations}
+\method\ is a local nonlinear optimizer and does not replace global homotopy
+search. Its deterministic polygon bypass is suitable for the tested convex
+obstacles; complicated maps still benefit from a feasible reference or a
+search front end. The quadcopter model omits full rigid-body angular dynamics.
+Shared-memory decomposition does not address communication delay or packet
+loss. Finally, continuation can reduce repeated QP work but does not guarantee
+fewer SCP or ADMM iterations on every small problem; the claimed advantage is
+the bounded-degree medium-to-large regime and the ability to negotiate
+coupling that fixed-corridor refiners remove.
+
+\section{Conclusion}
+\label{sec:conclusion}
+This letter extends \oldmethod\ from structured linear multi-agent QPs to
+nonlinear heterogeneous trajectory optimization. The key mechanism is nested
+parametric continuation: temporal Riccati structure, active-set information,
+and geometry-aligned consensus state are reused at the iteration boundary where
+each is valid. Strict globalization and independent validation preserve safety.
+The frozen experiments are designed to test two complementary claims rather
+than one universal speed claim: structural crossover against centralized QP
+solvers and recovery of locally conflicted search trajectories that fixed
+separating planes cannot negotiate.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+\end{document}

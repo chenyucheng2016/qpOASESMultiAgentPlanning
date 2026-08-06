@@ -120,6 +120,18 @@ parametric active-set hotstarts are complementary for linear multi-agent QPs.
 \method extends that mechanism across nonlinear relinearizations rather than
 claiming a new ADMM splitting.
 
+Recent decentralized planners make different coupling choices. Robust
+MADER~\cite{Kondo2023RobustMADER} optimizes against communicated trajectories
+and explicitly protects asynchronous execution from communication delay.
+Spatiotemporal-occupancy methods~\cite{Wu2024SOGM} embed shared trajectories
+into local maps and construct independent safe corridors, while
+MA-DV$^2$F~\cite{Ma2025MADV2F} generates dynamic velocity fields independently
+for nonholonomic vehicles. These methods prioritize reactive or onboard
+decentralized navigation. In contrast, \method is a batch optimizer on one
+shared-memory machine: it retains negotiable pair constraints during every SCP
+step, but does not claim communication-delay robustness or feedback-control
+rates.
+
 Sequential convex optimization is widely used to obtain locally optimal
 collision-free trajectories~\cite{Schulman2013TrajOpt}. Its performance and
 robustness depend on the reference homotopy, trust-region policy, and recovery

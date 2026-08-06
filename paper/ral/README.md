@@ -8,11 +8,36 @@ The results section currently distinguishes development evidence from final
 evidence. Do not remove that distinction until all machine-enforced gates pass
 and the untouched 720-case split has been executed exactly once.
 
-Build with:
+The LaTeX distribution must provide `IEEEtran`, `amsmath`, `booktabs`, `cite`,
+`graphicx`, and `multirow`. Build with `latexmk` when Perl is available:
 
 ```bash
 latexmk -pdf -interaction=nonstopmode -halt-on-error main.tex
 ```
+
+The equivalent explicit build, which was used for the rendered QA copy, is:
+
+```bash
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+bibtex main
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+```
+
+Generate the three benchmark figures only from manifest-locked analysis CSVs:
+
+```bash
+python generate_figures.py \
+  --paired-aggregate <primary>/paired_aggregate.csv \
+  --full-vs-inner <ablation>/full_vs_inner_aggregate.csv \
+  --full-vs-qp-continuation \
+    <ablation>/full_vs_qp_continuation_aggregate.csv \
+  --csdo-statistics <csdo>/paired_statistics.csv \
+  --output-dir <figures>
+```
+
+Development figures are for layout and analysis checks only. Regenerate them
+from the untouched final artifacts after the solver and protocol are frozen.
 
 Before submission:
 

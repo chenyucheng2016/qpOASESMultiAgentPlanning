@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -61,6 +62,7 @@ struct Arguments
     int scenarioIndex;
     int threads;
     int maxScpIterations;
+    real_t maximumObjective;
     bool fixedRho;
     bool exactAdmm;
     bool dryRun;
@@ -68,7 +70,8 @@ struct Arguments
     bool requireConvergence;
     Arguments() : suite("smoke"), output("nonlinear_benchmark.csv"), method("all"),
         track("all"), caseId("all"), scenarioIndex(-1), threads(0),
-        maxScpIterations(0),
+        maxScpIterations(0), maximumObjective(
+            std::numeric_limits<real_t>::infinity()),
         fixedRho(false), exactAdmm(false), dryRun(false), requireSuccess(false),
         requireConvergence(false) {}
 };
@@ -113,6 +116,16 @@ bool parseArguments(int argc, char** argv, Arguments& arguments)
         if (option == "--exact-admm")
         {
             arguments.exactAdmm = true;
+            continue;
+        }
+        if (option == "--maximum-objective" && i + 1 < argc)
+        {
+            char* end = 0;
+            const real_t value = std::strtod(argv[++i], &end);
+            if (end == argv[i] || *end != '\0'
+                || !std::isfinite(value) || value <= 0.0)
+                return false;
+            arguments.maximumObjective = value;
             continue;
         }
         if ((option == "--scenario-index" || option == "--threads"
@@ -751,6 +764,7 @@ NonlinearTurboOptions solverOptions(
     options.collisionSamplesPerInterval = 20;
     options.maxScpIterations = maxScpIterations > 0 ? maxScpIterations : 90;
     options.maxAdmmIterations = 50;
+    options.minimumAdmmIterations = 1;
     options.maxWorkingSetRecalculations = 400;
     options.rho = 35.0;
     options.adaptiveRho = adaptiveRho;
@@ -781,7 +795,7 @@ void writeHeader(std::ofstream& output)
         "minimum_obstacle_clearance,maximum_dynamics_defect,maximum_terminal_error,"
         "scp_iterations,admm_iterations,qp_solves,qp_working_set_recalculations,backend_iterations,"
         "last_qp_status,failed_agent,primal_residual,dual_residual,"
-        "collision_samples_per_interval,max_scp_iterations,max_admm_iterations,"
+        "collision_samples_per_interval,max_scp_iterations,max_admm_iterations,minimum_admm_iterations,"
         "polishing_admm_iterations,merit_penalty,rho,adaptive_rho,adaptive_rho_active,"
         "rho_updates,minimum_admm_rho,maximum_admm_rho,final_admm_rho,"
         "restoration_attempts,successful_restorations,line_search_recovery_attempts,"
@@ -844,6 +858,7 @@ bool runCase(
     const Method& method,
     int threads,
     int maxScpIterations,
+    real_t maximumObjective,
     bool adaptiveRho,
     bool inexactAdmm,
     bool requireConvergence,
@@ -913,7 +928,8 @@ bool runCase(
         << result.statistics.lastQpStatus << ',' << result.statistics.failedAgent << ','
         << result.statistics.primalResidual << ',' << result.statistics.dualResidual << ','
         << options.collisionSamplesPerInterval << ',' << options.maxScpIterations << ','
-        << options.maxAdmmIterations << ',' << options.polishingAdmmIterations << ','
+        << options.maxAdmmIterations << ',' << options.minimumAdmmIterations << ','
+        << options.polishingAdmmIterations << ','
         << options.meritPenalty << ','
         << options.rho << ',' << (options.adaptiveRho ? 1 : 0) << ','
         << (options.adaptiveRho ? 1 : 0) << ','
@@ -982,7 +998,8 @@ bool runCase(
         result.success ? 1 : 0, validation.success ? 1 : 0,
         result.statistics.solveTimeMilliseconds);
     return result.success && validation.success
-        && (!requireConvergence || result.converged);
+        && (!requireConvergence || result.converged)
+        && result.statistics.objective <= maximumObjective;
 }
 
 }
@@ -997,6 +1014,7 @@ int main(int argc, char** argv)
             "[--scenario-index nonnegative_integer] [--track all|scaling|models|families|primary] [--output file.csv] "
             "[--method all|cold|inner|qp_continuation|full|centralized_qpoases|centralized_osqp] "
             "[--threads positive_integer] [--max-scp-iterations positive_integer] "
+            "[--maximum-objective positive_number] "
             "[--fixed-rho] [--exact-admm] "
             "[--dry-run] [--require-success] [--require-convergence]\n",
             argv[0]);
@@ -1055,6 +1073,7 @@ int main(int argc, char** argv)
                 allSuccessful = runCase(
                     arguments.suite, scenario, selectedMethods[method], arguments.threads,
                     arguments.maxScpIterations,
+                    arguments.maximumObjective,
                     !arguments.fixedRho, !arguments.exactAdmm,
                     arguments.requireConvergence, output, traceOutput
                 ) && allSuccessful;
@@ -1109,6 +1128,7 @@ int main(int argc, char** argv)
                     allSuccessful = runCase(
                         arguments.suite, scenario, selectedMethods[method], arguments.threads,
                         arguments.maxScpIterations,
+                        arguments.maximumObjective,
                         !arguments.fixedRho, !arguments.exactAdmm,
                         arguments.requireConvergence, output, traceOutput
                     ) && allSuccessful;

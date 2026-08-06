@@ -40,6 +40,7 @@ STATUS_FIELDS = (
     "execution_status",
     "return_code",
     "wall_time_seconds",
+    "peak_memory_kib",
     "result_file",
     "log_file",
     "message",
@@ -185,6 +186,47 @@ def discover_count(executable, suite, track, output_dir):
     return int(match.group(1))
 
 
+def sample_peak_memory_kib(pid):
+    """Return Linux VmHWM for one process, falling back to VmRSS."""
+    try:
+        lines = Path(f"/proc/{pid}/status").read_text(
+            encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    resident = None
+    for line in lines:
+        if line.startswith("VmHWM:"):
+            return int(line.split()[1])
+        if line.startswith("VmRSS:"):
+            resident = int(line.split()[1])
+    return resident
+
+
+def run_monitored(command, log_stream, timeout_seconds, environment):
+    """Run one benchmark while sampling its direct-process peak memory."""
+    process = subprocess.Popen(
+        command,
+        stdout=log_stream,
+        stderr=subprocess.STDOUT,
+        env=environment,
+    )
+    deadline = time.monotonic() + timeout_seconds
+    peak_memory_kib = None
+    while True:
+        sample = sample_peak_memory_kib(process.pid)
+        if sample is not None:
+            peak_memory_kib = max(peak_memory_kib or 0, sample)
+        return_code = process.poll()
+        if return_code is not None:
+            return return_code, peak_memory_kib, False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            process.kill()
+            process.wait()
+            return process.returncode, peak_memory_kib, True
+        time.sleep(min(0.02, remaining))
+
+
 def read_statuses(path):
     if not path.exists():
         return {}
@@ -216,6 +258,7 @@ def combine_results(path, tasks, statuses):
         row["repetition"] = repetition
         row["execution_status"] = status.get("execution_status", "completed")
         row["wall_time_seconds"] = status.get("wall_time_seconds", "")
+        row["peak_memory_kib"] = status.get("peak_memory_kib", "")
         fields = list(row)
         rows.append(row)
     if fields is None:
@@ -228,7 +271,8 @@ def combine_results(path, tasks, statuses):
     os.replace(temporary, path)
 
 
-def status_record(arguments, selector, method, repetition, state, return_code, elapsed, result_path, log_path, message):
+def status_record(arguments, selector, method, repetition, state, return_code,
+                  elapsed, peak_memory_kib, result_path, log_path, message):
     return {
         "suite": arguments.suite,
         "track": arguments.track,
@@ -238,6 +282,8 @@ def status_record(arguments, selector, method, repetition, state, return_code, e
         "execution_status": state,
         "return_code": return_code,
         "wall_time_seconds": f"{elapsed:.6f}",
+        "peak_memory_kib": ("" if peak_memory_kib is None
+                            else str(peak_memory_kib)),
         "result_file": str(result_path),
         "log_file": str(log_path),
         "message": message,
@@ -333,7 +379,8 @@ def main():
             if key not in statuses or statuses[key].get("execution_status") != "completed":
                 log_path = result_path.with_suffix(".log")
                 statuses[key] = status_record(
-                    arguments, selector, method, repetition, "completed", 0, 0.0,
+                    arguments, selector, method, repetition, "completed", 0,
+                    0.0, None,
                     result_path, log_path, "resumed result"
                 )
                 write_statuses(status_path, statuses)
@@ -360,19 +407,19 @@ def main():
         command += list(selector_arguments)
         print(f"[{index}/{total}] run {selector} {method}", flush=True)
         started = time.monotonic()
-        try:
-            with log_path.open("wb") as log_stream:
-                completed = subprocess.run(
-                    command,
-                    stdout=log_stream,
-                    stderr=subprocess.STDOUT,
-                    timeout=arguments.timeout_seconds,
-                    check=False,
-                    env=environment,
-                )
-            elapsed = time.monotonic() - started
+        with log_path.open("wb") as log_stream:
+            return_code, peak_memory_kib, timed_out = run_monitored(
+                command, log_stream, arguments.timeout_seconds, environment)
+        elapsed = time.monotonic() - started
+        if timed_out:
+            statuses[key] = status_record(
+                arguments, selector, method, repetition, "timeout", return_code,
+                elapsed, peak_memory_kib, result_path, log_path,
+                f"exceeded {arguments.timeout_seconds:g} seconds",
+            )
+        else:
             row = read_single_result(partial)
-            if completed.returncode == 0 and row is not None:
+            if return_code == 0 and row is not None:
                 os.replace(partial, result_path)
                 if partial_trace.is_file():
                     os.replace(partial_trace, final_trace)
@@ -382,14 +429,8 @@ def main():
                 state = "error"
                 message = "process failed or did not produce exactly one result row"
             statuses[key] = status_record(
-                arguments, selector, method, repetition, state, completed.returncode,
-                elapsed, result_path, log_path, message,
-            )
-        except subprocess.TimeoutExpired:
-            elapsed = time.monotonic() - started
-            statuses[key] = status_record(
-                arguments, selector, method, repetition, "timeout", "", elapsed,
-                result_path, log_path, f"exceeded {arguments.timeout_seconds:g} seconds",
+                arguments, selector, method, repetition, state, return_code,
+                elapsed, peak_memory_kib, result_path, log_path, message,
             )
         write_statuses(status_path, statuses)
         combine_results(combined_path, tasks, statuses)

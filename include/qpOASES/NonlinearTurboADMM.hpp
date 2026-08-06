@@ -95,6 +95,7 @@ struct NonlinearTurboOptions
     int_t collisionSamplesPerInterval;
     int_t maxScpIterations;
     int_t maxAdmmIterations;
+    int_t minimumAdmmIterations;
     int_t maxWorkingSetRecalculations;
     int_t maxLineSearchSteps;
     real_t rho;

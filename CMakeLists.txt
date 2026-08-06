@@ -365,6 +365,39 @@ if(QPOASES_BUILD_NONLINEAR_TESTS)
         TIMEOUT 300
         RUN_SERIAL TRUE)
     add_test(
+        NAME nonlinear_polishing_stationarity_regression
+        COMMAND nonlinear_benchmark
+            --suite paper_development --track primary --scenario-index 30
+            --method full --fixed-rho --exact-admm
+            --require-success --require-convergence
+            --output ${CMAKE_BINARY_DIR}/nonlinear_polishing_stationarity_regression.csv
+    )
+    set_tests_properties(nonlinear_polishing_stationarity_regression PROPERTIES
+        TIMEOUT 300
+        RUN_SERIAL TRUE)
+    add_test(
+        NAME nonlinear_polishing_objective_regression
+        COMMAND nonlinear_benchmark
+            --suite paper_development --track primary --scenario-index 196
+            --method full --fixed-rho --exact-admm
+            --require-success --require-convergence --maximum-objective 6.5
+            --output ${CMAKE_BINARY_DIR}/nonlinear_polishing_objective_regression.csv
+    )
+    set_tests_properties(nonlinear_polishing_objective_regression PROPERTIES
+        TIMEOUT 300
+        RUN_SERIAL TRUE)
+    add_test(
+        NAME nonlinear_polishing_large_scale_regression
+        COMMAND nonlinear_benchmark
+            --suite paper_development --track primary --scenario-index 210
+            --method full --fixed-rho --exact-admm
+            --require-success --require-convergence
+            --output ${CMAKE_BINARY_DIR}/nonlinear_polishing_large_scale_regression.csv
+    )
+    set_tests_properties(nonlinear_polishing_large_scale_regression PROPERTIES
+        TIMEOUT 300
+        RUN_SERIAL TRUE)
+    add_test(
         NAME nonlinear_centralized_qpoases_easy
         COMMAND nonlinear_benchmark
             --suite manual --case easy_open --method centralized_qpoases

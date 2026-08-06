@@ -91,6 +91,15 @@ fi
 
 gate_status=0
 runner_status=0
+runtime_gate_arguments=()
+if [[ "${mode}" != "pilot" ]]; then
+    runtime_gate_arguments=(
+        --minimum-speedup-agent-count 12
+        --minimum-median-wall-speedup 1.5
+        --minimum-largest-scale-wall-speedup 2.0
+        --maximum-wall-speedup-sign-p-value 0.05
+    )
+fi
 python3 "${repo_root}/benchmarks/run_nonlinear_matrix.py" \
     "${build_dir}/bin/nonlinear_benchmark" \
     --suite "${suite}" \
@@ -125,7 +134,8 @@ if [[ -f "${output_dir}/results.csv" ]]; then
         python3 "${repo_root}/benchmarks/check_ral_primary_gate.py" \
             "${output_dir}/paired_results.csv" \
             --expected-pairs "${expected_pairs}" \
-            --maximum-absolute-objective-gap-percent 5.0 || gate_status=$?
+            --maximum-absolute-objective-gap-percent 5.0 \
+            "${runtime_gate_arguments[@]}" || gate_status=$?
     fi
 fi
 if [[ "${gate_status}" -ne 0 ]]; then

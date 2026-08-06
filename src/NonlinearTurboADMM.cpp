@@ -2143,7 +2143,8 @@ bool solveDistributed(const std::vector<NonlinearAgentProblem>& agents, int_t ou
         stats.consensusTimeMilliseconds += static_cast<real_t>(
             std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - consensusStart).count());
-        if (primal <= primalThreshold && dualResidual <= dualThreshold)
+        if (iteration + 1 >= options.minimumAdmmIterations
+            && primal <= primalThreshold && dualResidual <= dualThreshold)
         {
             admmConverged = true;
             break;
@@ -3144,7 +3145,8 @@ NonlinearTurboOptions::NonlinearTurboOptions()
     : coordinationMethod(NCM_DISTRIBUTED_ADMM), continuationMode(NCONT_FULL),
       useRiccatiWarmStart(true), parallelAgentSolves(true), parallelAgentThreads(0),
       collisionSamplesPerInterval(2),
-      maxScpIterations(8), maxAdmmIterations(40), maxWorkingSetRecalculations(300), maxLineSearchSteps(6), rho(30.0),
+      maxScpIterations(8), maxAdmmIterations(40), minimumAdmmIterations(1),
+      maxWorkingSetRecalculations(300), maxLineSearchSteps(6), rho(30.0),
       adaptiveRho(false), adaptiveRhoInterval(5), adaptiveRhoImbalance(10.0),
       adaptiveRhoScale(2.0), minimumRho(1.0), maximumRho(1000.0),
       inexactAdmmScpIterations(0), inexactAdmmToleranceMultiplier(1.0),
@@ -3235,6 +3237,8 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         return result;
     }
     if (options.maxScpIterations <= 0 || options.maxAdmmIterations <= 0
+        || options.minimumAdmmIterations <= 0
+        || options.minimumAdmmIterations > options.maxAdmmIterations
         || !std::isfinite(options.admmPrimalTolerance)
         || options.admmPrimalTolerance < 0.0
         || !std::isfinite(options.admmDualTolerance)
@@ -3360,17 +3364,26 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         // when pairwise clearance is the sole remaining feasibility defect.
         const int_t pairRepairIteration = std::max<int_t>(
             3, options.maxScpIterations / 2);
+        const bool nominalDynamicsFeasible = dynamicsDefect(
+            agents, nominalStates, nominalControls) <= options.dynamicsTolerance;
+        const bool nominalTerminalFeasible = maximumTerminalViolation(
+            agents, nominalStates, options) <= 0.0;
+        const bool nominalObstacleFeasible = minimumObstacleClearance(
+            agents, nominalStates, obstacles, options)
+                >= -options.collisionTolerance;
         const real_t nominalPairwiseClearance = minimumPairwiseClearance(
             agents, nominalStates, options);
+        const bool nominalPairwiseFeasible = nominalPairwiseClearance
+            >= -options.collisionTolerance;
+        const bool nominalFeasible = nominalDynamicsFeasible
+            && nominalTerminalFeasible && nominalObstacleFeasible
+            && nominalPairwiseFeasible;
+        const bool exactRejectedStepRecovery = recoveringRejectedStep;
         const bool finalPairRepair =
             options.coordinationMethod == NCM_DISTRIBUTED_ADMM
             && outer + 1 >= pairRepairIteration
-            && dynamicsDefect(agents, nominalStates, nominalControls)
-                <= options.dynamicsTolerance
-            && maximumTerminalViolation(agents, nominalStates, options) <= 0.0
-            && minimumObstacleClearance(
-                agents, nominalStates, obstacles, options)
-                >= -options.collisionTolerance
+            && nominalDynamicsFeasible && nominalTerminalFeasible
+            && nominalObstacleFeasible
             && nominalPairwiseClearance < -options.collisionTolerance;
         if (adaptiveRhoSafeguard)
             iterationOptions.adaptiveRho = false;
@@ -3383,7 +3396,7 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             iterationOptions.admmRelativeTolerance = 0.0;
             iterationOptions.maxAdmmIterations = options.polishingAdmmIterations;
         }
-        if (recoveringRejectedStep || finalPairRepair)
+        if (exactRejectedStepRecovery || finalPairRepair)
         {
             iterationOptions.adaptiveRho = false;
             iterationOptions.rho = options.rho;
@@ -3667,15 +3680,21 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                     std::fabs(qpControls[a][i] - nominalControls[a][i]));
         if (bestAlpha <= 0.0)
         {
+            real_t contractedTrustRegion =
+                attemptTrustRegion * options.restorationTrustRegionShrink;
+            real_t trustRegionFloor = options.minimumControlTrustRegion;
+            // Jump to verification scale only after polishing has begun or
+            // the rejected QP direction is already within one order of the
+            // requested SCP step tolerance.
+            if (nominalFeasible
+                && (polishing || exactRejectedStepRecovery
+                    || maximumQpStep <= 10.0 * options.scpStepTolerance))
+            {
+                trustRegionFloor = 0.5 * options.scpStepTolerance;
+                contractedTrustRegion = trustRegionFloor;
+            }
             currentTrustRegion = std::max(
-                options.minimumControlTrustRegion,
-                attemptTrustRegion * options.restorationTrustRegionShrink
-            );
-            distributedSolvers.reset();
-            reliableDistributedSolvers.reset();
-            elasticDistributedSolvers.reset();
-            centralContext.reset();
-            previousPairs.clear();
+                trustRegionFloor, contractedTrustRegion);
         }
         // A heavily damped terminal/dynamics restoration step signals a poor
         // local model. Keep the established trust policy for collision repair,
@@ -3713,6 +3732,8 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
             else
                 slowProgressIterations = 0;
         }
+        const bool coupledInteractionGraph =
+            result.statistics.maximumAgentDegree > 1;
 
         result.statistics.globalizationTimeMilliseconds += static_cast<real_t>(
             std::chrono::duration<double, std::milli>(
@@ -3741,12 +3762,14 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         trace.maximumTerminalPositionError = maximumTerminalPositionError(
             agents, nominalStates);
         const bool rejectedStepStationary = bestAlpha <= 0.0
-            && recoveringRejectedStep && polishing && trace.admmConverged
-            && (maximumQpStep <= options.scpStepTolerance
-                || slowProgressIterations >= 3);
+            && recoveringRejectedStep
+            && (polishing || exactRejectedStepRecovery) && trace.admmConverged
+            && maximumQpStep <= options.scpStepTolerance;
         const bool sustainedStrictStagnation = bestAlpha > 0.0
             && polishing && trace.admmConverged
-            && slowProgressIterations >= 3;
+            && slowProgressIterations >= 3
+            && (coupledInteractionGraph
+                || maximumQpStep <= 10.0 * options.scpStepTolerance);
         const bool nonlinearConverged =
             ((bestAlpha > 0.0
                 && maximumStep <= options.scpStepTolerance
@@ -3765,6 +3788,10 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
                 ++rejectedStepRecoveryAttempts;
                 ++result.statistics.lineSearchRecoveryAttempts;
                 recoveringRejectedStep = true;
+                if (!(nominalFeasible
+                        && maximumQpStep
+                            <= 10.0 * options.scpStepTolerance))
+                    polishing = false;
                 adaptiveRhoSafeguard = true;
                 result.scpTrace.push_back(trace);
                 continue;
@@ -3796,8 +3823,12 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         else if (options.coordinationMethod == NCM_DISTRIBUTED_ADMM
             && !polishing
             && bestAlpha > 0.0
+            && (coupledInteractionGraph
+                || maximumQpStep <= 10.0 * options.scpStepTolerance)
             && relativeMeritDecrease <= options.scpStepTolerance)
         {
+            // Merit stagnation requests exact consensus for a coupled graph,
+            // or after a sparse-graph direction is already locally small.
             polishing = true;
             continue;
         }

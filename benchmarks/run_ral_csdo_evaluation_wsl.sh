@@ -71,3 +71,10 @@ python3 scripts/summarize_csdo_congested_suite.py \
 python3 scripts/analyze_csdo_paired_statistics.py \
   "${result_root}/summary.csv" \
   --output "${result_root}/paired_statistics.csv"
+python3 scripts/check_ral_csdo_gate.py \
+  "${result_root}/summary.csv" \
+  "${result_root}/paired_statistics.csv" \
+  --expected-cases 32 \
+  --minimum-turbo-successes 30 \
+  --minimum-pbs-recovery-rate 0.8 \
+  --maximum-mcnemar-p 0.05

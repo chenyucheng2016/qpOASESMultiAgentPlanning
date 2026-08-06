@@ -128,6 +128,8 @@ def main():
         "summarize_csdo_congested_suite.py")
     paired_analyzer = pathlib.Path(__file__).with_name(
         "analyze_csdo_paired_statistics.py")
+    publication_gate = pathlib.Path(__file__).with_name(
+        "check_ral_csdo_gate.py")
     ordered_cases = list(cases)
     random.Random(args.schedule_seed).shuffle(ordered_cases)
     tasks = []
@@ -162,6 +164,7 @@ def main():
             "comparison_library": file_record(comparison_library),
             "summarizer": file_record(summarizer),
             "paired_analyzer": file_record(paired_analyzer),
+            "publication_gate": file_record(publication_gate),
             "csdo_executable": file_record(args.csdo_executable),
             "turbo_executable": file_record(args.turbo_executable),
             "root_exporter": file_record(args.root_exporter),

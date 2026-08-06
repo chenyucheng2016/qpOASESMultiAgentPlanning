@@ -228,10 +228,12 @@ pair-stage incidence $e$, a selector $P_{i,e}^s$ exposes the local position
 used by \eqref{eq:pair-halfspace}. Introducing auxiliary positions $z_e$ and
 scaled duals $y_{i,e}$ yields the local ADMM update
 \begin{equation}
- w_i^{r+1}=\arg\min_{w_i\in\mathcal W_i^s}
- \frac{1}{2}w_i^T H_i^s w_i+(g_i^s)^T w_i
- +\frac{\rho}{2}\sum_{e\in\mathcal E_i^s}
+ \begin{aligned}
+ w_i^{r+1}=\arg\min_{w_i\in\mathcal W_i^s}\;&
+ \frac{1}{2}w_i^T H_i^s w_i+(g_i^s)^T w_i\\
+ &+\frac{\rho}{2}\sum_{e\in\mathcal E_i^s}
  \norm{P_{i,e}^s w_i-z_{i,e}^r+y_{i,e}^r}_2^2.
+ \end{aligned}
 \label{eq:local-qp}
 \end{equation}
 All local QPs are independent and are solved in parallel. The coordinator

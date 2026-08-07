@@ -27,8 +27,8 @@ case "${mode}" in
         methods=${all_methods}
         scenario_indices=
         expected_pairs=720
-        if [[ -n "${METHODS:-}" || -n "${SCENARIO_INDICES:-}" || -n "${TIMEOUT_SECONDS:-}" ]]; then
-            echo "final mode does not accept method, scenario, or timeout overrides" >&2
+        if [[ -n "${METHODS:-}" || -n "${SCENARIO_INDICES:-}" || -n "${TIMEOUT_SECONDS:-}" || -n "${PROTOCOL_ID:-}" ]]; then
+            echo "final mode does not accept method, scenario, timeout, or protocol overrides" >&2
             exit 2
         fi
         ;;
@@ -37,6 +37,10 @@ case "${mode}" in
         exit 2
         ;;
 esac
+
+if [[ "${mode}" != "final" && -n "${PROTOCOL_ID:-}" ]]; then
+    protocol_id=${PROTOCOL_ID}
+fi
 
 if [[ -f "${repo_root}/.git" ]]; then
     git_dir=$(sed -n 's/^gitdir: //p' "${repo_root}/.git")

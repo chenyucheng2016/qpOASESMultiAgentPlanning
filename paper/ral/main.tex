@@ -395,9 +395,6 @@ passes the predeclared 20\% novelty-effect target on development data; the
 same comparison will be repeated after the convergence fix is frozen.
 
 \subsection{CSDO-Compatible Recovery}
-The values below are pre-provenance development evidence. Protocol v4 must
-reproduce them with recorded shared-front-end and failure-artifact provenance
-before submission.
 
 Table~\ref{tab:csdo} reports every case in the disjoint evaluation grid.
 \method\ validates \TurboCSDOSuccesses\ of \CSDOCases\ cases, versus
@@ -405,12 +402,15 @@ Table~\ref{tab:csdo} reports every case in the disjoint evaluation grid.
 \CSDOBothValid\ shared successes, \TurboOnlyValid\ \method-only successes,
 \CSDOOnlyValid\ CSDO-only successes, and \CSDONeitherValid\ joint failures.
 The exact two-sided McNemar test is $p=\CSDOMcNemarP$. Of \PBSFailureCases\
-cases where the common PBS/root search fails, \method\ repairs
-\TurboPBSRecoveries\ (\TurboPBSRecoveryPercent\%), while CSDO repairs none.
-Every success is checked by the same continuous validator.
+cases where CSDO's PBS search fails, \method\ repairs \TurboPBSRecoveries\
+(\TurboPBSRecoveryPercent\%), while CSDO repairs none.
+These comprise \PBSRootFailureCases\ retained-root cases and
+\IndependentPathFailureCases\ cases initialized from mutually conflicted
+single-agent Hybrid-A* paths. Every success is checked by the same continuous
+validator.
 
 \begin{table}[t]
-\caption{Development CSDO evidence (\CSDOCases\ cases; v4 rerun pending).}
+\caption{Frozen paired CSDO evaluation (\CSDOCases\ cases).}
 \label{tab:csdo}
 \centering
 \begin{tabular}{lcc}
@@ -432,9 +432,11 @@ claim. Median \method\ optimizer-process wall time is
 time is \CSDOMedianWallSeconds~s. CSDO is fast precisely because its
 searched separating planes eliminate all optimization coupling. The result
 instead isolates the cost and benefit of retaining negotiable boundaries when
-the root is locally conflicted. On shared successes, \method\ reduces arrival
-sum modestly but has a worse smoothness objective; these secondary trade-offs
-are reported rather than folded into a single favorable score.
+the search artifact is locally conflicted. On shared successes, median path
+length is \TurboSharedPathMedianMeters~m for \method\ and
+\CSDOSharedPathMedianMeters~m for CSDO, only a
+\SharedPathReductionPercent\% reduction. We therefore make no broad path
+quality or reduced-conservatism claim from this suite.
 
 \subsection{Required Final Evidence}
 Before submission, the frozen solver must pass: (i) all six headline

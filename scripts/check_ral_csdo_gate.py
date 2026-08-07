@@ -90,10 +90,18 @@ def main():
             root_conflicts = as_int(row, "root_conflicting_pairs")
             warmstart_conflicts = as_int(
                 row, "warmstart_conflicting_pairs")
+            failure_artifacts = {
+                "pbs_root": (
+                    "pbs_root_guess", "pbs_root_corridor"),
+                "independent_single_agent": (
+                    "independent_single_agent_guess",
+                    "independent_single_agent_corridor"),
+            }
+            expected_artifacts = failure_artifacts.get(source)
             valid = (
-                source == "pbs_root"
-                and guess_artifact == "pbs_root_guess"
-                and corridor_artifact == "pbs_root_corridor"
+                expected_artifacts is not None
+                and guess_artifact == expected_artifacts[0]
+                and corridor_artifact == expected_artifacts[1]
                 and row.get("turbo_guess_sha256")
                     == row.get("root_guess_sha256")
                 and row.get("turbo_corridor_sha256")
@@ -109,7 +117,8 @@ def main():
             provenance_mismatches.append(instance)
     if provenance_mismatches:
         failures.append(
-            f"{len(provenance_mismatches)} cases fail shared-front-end provenance")
+            f"{len(provenance_mismatches)} cases fail shared-front-end or "
+            "failure-artifact provenance")
     if len(statistics_rows) != 1:
         failures.append(
             f"expected one paired-statistics row, found {len(statistics_rows)}")
@@ -124,6 +133,15 @@ def main():
     recovery_rate = as_float(statistics, "turbo_pbs_recovery_rate")
     success_rate_difference = as_float(statistics, "success_rate_difference")
     mcnemar_p = as_float(statistics, "mcnemar_exact_p_value")
+    failure_cases = as_int(statistics, "pbs_failure_cases")
+    root_failure_cases = as_int(statistics, "pbs_root_failure_cases")
+    independent_failure_cases = as_int(
+        statistics, "independent_path_failure_cases")
+    if (failure_cases <= 0
+            or root_failure_cases + independent_failure_cases
+            != failure_cases):
+        failures.append(
+            "PBS-failure cohort counts are missing or inconsistent")
     if turbo_successes < arguments.minimum_turbo_successes:
         failures.append(
             f"Turbo successes {turbo_successes} are below {arguments.minimum_turbo_successes}")

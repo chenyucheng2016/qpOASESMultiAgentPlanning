@@ -118,11 +118,20 @@ def main():
             root_conflicts = max(
                 integer(row, "root_conflicting_pairs"),
                 integer(row, "warmstart_conflicting_pairs"))
+            source = row.get("warmstart_source")
+            failure_artifacts = {
+                "pbs_root": (
+                    "pbs_root_guess", "pbs_root_corridor"),
+                "independent_single_agent": (
+                    "independent_single_agent_guess",
+                    "independent_single_agent_corridor"),
+            }
+            expected_artifacts = failure_artifacts.get(source)
             provenance_valid = provenance_valid and (
-                row.get("warmstart_source") == "pbs_root"
-                and row.get("turbo_guess_artifact") == "pbs_root_guess"
+                expected_artifacts is not None
+                and row.get("turbo_guess_artifact") == expected_artifacts[0]
                 and row.get("turbo_corridor_artifact")
-                    == "pbs_root_corridor"
+                    == expected_artifacts[1]
                 and row.get("turbo_guess_sha256")
                     == row.get("root_guess_sha256")
                 and row.get("turbo_corridor_sha256")
@@ -135,7 +144,8 @@ def main():
             raise ValueError("CSDO summary contains an invalid PBS status")
         if not provenance_valid:
             raise ValueError(
-                "CSDO summary does not prove shared-front-end provenance for "
+                "CSDO summary does not prove shared-front-end or "
+                "failure-artifact provenance for "
                 f"{row.get('instance', '<unknown>')}")
 
     csdo_walls = [number(row, "csdo_wall_time") for row in csdo_summary]
@@ -165,6 +175,10 @@ def main():
         "CSDONeitherValid": str(integer(csdo, "neither_valid")),
         "CSDOMcNemarP": scientific_latex(number(csdo, "mcnemar_exact_p_value")),
         "PBSFailureCases": str(integer(csdo, "pbs_failure_cases")),
+        "PBSRootFailureCases": str(
+            integer(csdo, "pbs_root_failure_cases")),
+        "IndependentPathFailureCases": str(
+            integer(csdo, "independent_path_failure_cases")),
         "TurboPBSRecoveries": str(integer(csdo, "turbo_pbs_recoveries")),
         "TurboPBSRecoveryPercent": f'{100.0 * number(csdo, "turbo_pbs_recovery_rate"):.1f}',
         "CSDOWilsonLowPercent": f'{100.0 * number(csdo, "csdo_wilson_lower"):.1f}',

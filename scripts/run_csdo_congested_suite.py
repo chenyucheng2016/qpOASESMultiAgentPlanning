@@ -154,7 +154,7 @@ def main():
             "minimum_horizon": minimum_horizon,
         })
     manifest_value = {
-        "schema_version": 3,
+        "schema_version": 4,
         "protocol_id": args.protocol_id,
         "git_commit": args.git_commit,
         "csdo_source_commit": args.csdo_source_commit.lower(),

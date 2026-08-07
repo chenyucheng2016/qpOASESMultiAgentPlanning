@@ -24,6 +24,10 @@ FIELDS = (
     "neither_valid",
     "mcnemar_exact_p_value",
     "pbs_failure_cases",
+    "pbs_root_failure_cases",
+    "independent_path_failure_cases",
+    "turbo_pbs_root_recoveries",
+    "turbo_independent_path_recoveries",
     "turbo_pbs_recoveries",
     "turbo_pbs_recovery_rate",
     "turbo_pbs_recovery_wilson_lower",
@@ -74,12 +78,21 @@ def analyze(rows):
     paired = {(True, True): 0, (True, False): 0,
               (False, True): 0, (False, False): 0}
     pbs_failures = []
+    failure_sources = {
+        "pbs_root": [],
+        "independent_single_agent": [],
+    }
     for row in rows:
         csdo_valid = boolean(row["csdo_valid"])
         turbo_valid = boolean(row["turbo_valid"])
         paired[(turbo_valid, csdo_valid)] += 1
         if not boolean(row["pbs_success"]):
-            pbs_failures.append((turbo_valid, csdo_valid))
+            outcome = (turbo_valid, csdo_valid)
+            pbs_failures.append(outcome)
+            source = row.get("warmstart_source")
+            if source not in failure_sources:
+                raise ValueError(f"unsupported PBS-failure artifact: {source}")
+            failure_sources[source].append(outcome)
 
     both_valid = paired[(True, True)]
     turbo_only = paired[(True, False)]
@@ -115,6 +128,14 @@ def analyze(rows):
         "neither_valid": neither_valid,
         "mcnemar_exact_p_value": exact_mcnemar(turbo_only, csdo_only),
         "pbs_failure_cases": len(pbs_failures),
+        "pbs_root_failure_cases": len(failure_sources["pbs_root"]),
+        "independent_path_failure_cases": len(
+            failure_sources["independent_single_agent"]),
+        "turbo_pbs_root_recoveries": sum(
+            turbo for turbo, _ in failure_sources["pbs_root"]),
+        "turbo_independent_path_recoveries": sum(
+            turbo for turbo, _ in
+            failure_sources["independent_single_agent"]),
         "turbo_pbs_recoveries": turbo_recoveries,
         "turbo_pbs_recovery_rate": turbo_recovery_rate,
         "turbo_pbs_recovery_wilson_lower": recovery_lower,

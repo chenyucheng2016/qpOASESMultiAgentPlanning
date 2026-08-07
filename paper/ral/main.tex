@@ -358,11 +358,14 @@ search, verifies schedule equality to $10^{-9}$, and reconstructs the static
 obstacle corridors before either optimization branch is run.
 Original CSDO then constructs fixed inter-agent separating planes and solves
 independent vehicle QPs; \method\ instead retains negotiable pair coupling. If
-PBS fails, the exporter preserves its genuinely conflicted root and static
-corridors as \method's input while original CSDO reports search failure.
-\method\ may widen only the temporal indexing of the reconstructed static
-corridor under the frozen recovery rule. Every source, executable, schedule,
-and corridor artifact is hashed. Development uses 24 passing-bay
+PBS fails, the exporter preserves a conflicted root when PBS exposes one. If
+PBS exposes no root, it runs the same Hybrid-A* search independently for each
+vehicle, producing individually feasible but mutually conflicted paths.
+Either failure artifact and its reconstructed static corridors become
+\method's input, while original CSDO reports search failure. \method\ may
+widen only the temporal indexing of the reconstructed static corridor under
+the frozen recovery rule. Every source, executable, schedule, and corridor
+artifact is hashed. Development uses 24 passing-bay
 instances; evaluation uses a disjoint 32-case grid varying bay length, arrival
 offset, and priority order.
 
@@ -392,8 +395,9 @@ passes the predeclared 20\% novelty-effect target on development data; the
 same comparison will be repeated after the convergence fix is frozen.
 
 \subsection{CSDO-Compatible Recovery}
-The values below are pre-provenance development evidence. Protocol v3 must
-reproduce them with recorded shared-front-end provenance before submission.
+The values below are pre-provenance development evidence. Protocol v4 must
+reproduce them with recorded shared-front-end and failure-artifact provenance
+before submission.
 
 Table~\ref{tab:csdo} reports every case in the disjoint evaluation grid.
 \method\ validates \TurboCSDOSuccesses\ of \CSDOCases\ cases, versus
@@ -406,7 +410,7 @@ cases where the common PBS/root search fails, \method\ repairs
 Every success is checked by the same continuous validator.
 
 \begin{table}[t]
-\caption{Development CSDO evidence (\CSDOCases\ cases; v3 rerun pending).}
+\caption{Development CSDO evidence (\CSDOCases\ cases; v4 rerun pending).}
 \label{tab:csdo}
 \centering
 \begin{tabular}{lcc}

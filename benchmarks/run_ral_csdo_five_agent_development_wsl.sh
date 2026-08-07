@@ -30,7 +30,7 @@ runner_args=(
   --csdo-config "${csdo_source}/config.yaml"
   --work-root "${work_root}"
   --output-csv "${result_csv}"
-  --protocol-id "csdo_five_agent_development_v3"
+  --protocol-id "csdo_five_agent_development_v4"
   --git-commit "${git_commit}"
   --csdo-source-commit "${csdo_commit}"
   --schedule-seed 20260806

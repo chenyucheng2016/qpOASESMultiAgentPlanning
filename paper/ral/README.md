@@ -63,8 +63,8 @@ Before submission:
 2. run and archive the 240-case strict-convergence development gate;
 3. rerun the continuation ablations with the frozen solver;
 4. run the six deterministic cases for ten interleaved repetitions;
-5. run the disjoint 32-case CSDO v3 suite with the same frozen solver and pass
-   its exact shared-front-end provenance gate;
+5. run the disjoint 32-case CSDO v4 suite with the same frozen solver and pass
+   its exact shared-front-end and failure-artifact provenance gate;
 6. execute the untouched 720-case final matrix once;
 7. replace development-only scaling text with final paired statistics;
 8. generate final figures from the manifest-locked CSV artifacts;

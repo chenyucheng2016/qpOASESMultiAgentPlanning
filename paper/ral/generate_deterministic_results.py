@@ -244,7 +244,9 @@ def main():
         rf"\newcommand{{\DeterministicMaximumDynamicsDefect}}{{{maximum_dynamics:.2e}}}",
         rf"\newcommand{{\DeterministicMaximumTerminalError}}{{{maximum_terminal:.2e}}}",
         "% Each cell is valid runs/repetitions; median wall time [s] on valid runs.",
+        r"\newcommand{\DeterministicTableRows}{%",
         *tex_rows,
+        "}",
     ]
     arguments.output_tex.parent.mkdir(parents=True, exist_ok=True)
     arguments.output_tex.write_text("\n".join(lines) + "\n", encoding="ascii")

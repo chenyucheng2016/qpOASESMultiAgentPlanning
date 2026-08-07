@@ -156,6 +156,21 @@ def main():
                 raise ValueError(
                     f"primary scale-method row N={agents} {method} is incomplete")
             primary_method_scale[(agents, method)] = row
+    for agents, paired_row in scale.items():
+        full_row = primary_method_scale[(agents, "full")]
+        osqp_row = primary_method_scale[(agents, "centralized_osqp")]
+        if (integer(full_row, "protocol_successes")
+                != integer(paired_row, "candidate_successes")
+                or integer(osqp_row, "protocol_successes")
+                != integer(paired_row, "baseline_successes")
+                or not math.isclose(
+                    number(full_row, "successful_wall_time_median_ms") / 1000.0,
+                    number(paired_row, "candidate_wall_time_median_s"))
+                or not math.isclose(
+                    number(osqp_row, "successful_wall_time_median_ms") / 1000.0,
+                    number(paired_row, "baseline_wall_time_median_s"))):
+            raise ValueError(
+                f"primary scale summaries disagree for N={agents}")
     inner = unique(read_csv(arguments.full_vs_inner), "inner ablation overall",
                    scope="overall", value="all")
     matrix_continuation = unique(

@@ -83,6 +83,13 @@ SHA-256 evidence hashes:
 
 ## Remaining submission evidence
 
+The pre-launch final protocol contains all 720 untouched scenarios and the
+three externally comparable methods: full TurboADMM-NL, centralized OSQP, and
+centralized qpOASES. The cold, inner-only, and QP-continuation variants remain
+in the completed 240-case development ablation; repeating them on the final
+split would not test an additional external-comparison claim. Final mode rejects
+method, scenario, timeout, and protocol overrides.
+
 Before submission, rerun the repeated deterministic protocol on the frozen
 solver, update the manuscript from these current artifacts, and execute the
 untouched 720-scenario final split once. No solver or benchmark parameter may

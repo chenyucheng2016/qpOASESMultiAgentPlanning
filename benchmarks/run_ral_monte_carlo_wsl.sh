@@ -5,7 +5,8 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 build_dir=${BUILD_DIR:-"${repo_root}/build-ral-wsl"}
 mode=${1:-pilot}
 
-all_methods=full,centralized_osqp,centralized_qpoases,qp_continuation,inner,cold
+primary_methods=full,centralized_osqp,centralized_qpoases
+ablation_methods=${primary_methods},qp_continuation,inner,cold
 case "${mode}" in
     pilot)
         suite=paper_development
@@ -17,14 +18,14 @@ case "${mode}" in
     development)
         suite=paper_development
         protocol_id=ral-monte-carlo-primary-development
-        methods=${METHODS:-${all_methods}}
+        methods=${METHODS:-${ablation_methods}}
         scenario_indices=${SCENARIO_INDICES:-}
         expected_pairs=240
         ;;
     final)
         suite=paper_final
         protocol_id=ral-monte-carlo-primary-final
-        methods=${all_methods}
+        methods=${primary_methods}
         scenario_indices=
         expected_pairs=720
         if [[ -n "${METHODS:-}" || -n "${SCENARIO_INDICES:-}" || -n "${TIMEOUT_SECONDS:-}" || -n "${PROTOCOL_ID:-}" ]]; then

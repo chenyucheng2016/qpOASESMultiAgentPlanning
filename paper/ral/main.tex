@@ -334,8 +334,9 @@ the identical SCP QP, plus the cold, inner, QP-continuation, and full
 distributed variants. Deterministic timings use ten fresh processes with
 interleaved method order. Monte Carlo uses paired seeds and reports medians,
 quartiles, Wilson success intervals, exact paired sign tests for crossover,
-and objective gaps on jointly valid outputs. Solver-internal time and process
-wall time are both retained.
+and objective gaps on jointly valid outputs. All six variants run on
+development; the untouched final split repeats only full, centralized OSQP,
+and centralized qpOASES because the ablation is frozen on 240 development cases.
 
 \subsection{Scenario Sets}
 The six headline deterministic cases progress from a two-unicycle open

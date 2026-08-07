@@ -2617,27 +2617,6 @@ real_t minimumDistance(const std::vector<NonlinearAgentProblem>& agents,
     return minimum;
 }
 
-void interpolatedCollisionPosition(
-    const NonlinearAgentProblem& agent,
-    int_t circle,
-    const std::vector<real_t>& states,
-    int_t stage,
-    real_t alpha,
-    int_t dimension,
-    std::vector<real_t>& position)
-{
-    const int_t nx = agent.model->stateDimension();
-    std::vector<real_t> first(dimension, 0.0);
-    std::vector<real_t> second(dimension, 0.0);
-    worldCollisionPosition(
-        agent, circle, &states[stage * nx], dimension, &first[0]);
-    worldCollisionPosition(
-        agent, circle, &states[(stage + 1) * nx], dimension, &second[0]);
-    position.resize(dimension);
-    for (int_t i = 0; i < dimension; ++i)
-        position[i] = first[i] + alpha * (second[i] - first[i]);
-}
-
 real_t minimumPairwiseClearance(
     const std::vector<NonlinearAgentProblem>& agents,
     const std::vector<std::vector<real_t> >& states,
@@ -2663,39 +2642,45 @@ real_t minimumPairwiseClearance(
         const real_t requiredDistance = firstGeometry.radius
             + secondGeometry.radius + endpointFeasiblePairBuffer(
                 agents[first], firstCircle, agents[second], secondCircle, options);
-        std::vector<real_t> pf(np, 0.0), ps(np, 0.0);
+        const int_t nxf = agents[first].model->stateDimension();
+        const int_t nxs = agents[second].model->stateDimension();
+        std::vector<real_t> firstBegin(np, 0.0), firstEnd(np, 0.0);
+        std::vector<real_t> secondBegin(np, 0.0), secondEnd(np, 0.0);
         for (int_t k = 0; k < agents[first].horizon; ++k)
-        for (int_t sample = 0;
-             sample <= options.collisionSamplesPerInterval;
-             ++sample)
         {
-            const real_t alpha = static_cast<real_t>(sample)
-                / options.collisionSamplesPerInterval;
-            interpolatedCollisionPosition(
-                agents[first],
-                firstCircle,
-                states[first],
-                k,
-                alpha,
-                np,
-                pf
-            );
-            interpolatedCollisionPosition(
-                agents[second],
-                secondCircle,
-                states[second],
-                k,
-                alpha,
-                np,
-                ps
-            );
-            real_t squared = 0.0;
-            for (int_t i = 0; i < np; ++i)
-                squared += (pf[i] - ps[i]) * (pf[i] - ps[i]);
-            minimum = std::min(
-                minimum,
-                std::sqrt(squared) - requiredDistance
-            );
+            worldCollisionPosition(
+                agents[first], firstCircle,
+                &states[first][k * nxf], np, &firstBegin[0]);
+            worldCollisionPosition(
+                agents[first], firstCircle,
+                &states[first][(k + 1) * nxf], np, &firstEnd[0]);
+            worldCollisionPosition(
+                agents[second], secondCircle,
+                &states[second][k * nxs], np, &secondBegin[0]);
+            worldCollisionPosition(
+                agents[second], secondCircle,
+                &states[second][(k + 1) * nxs], np, &secondEnd[0]);
+            for (int_t sample = 0;
+                 sample <= options.collisionSamplesPerInterval;
+                 ++sample)
+            {
+                const real_t alpha = static_cast<real_t>(sample)
+                    / options.collisionSamplesPerInterval;
+                real_t squared = 0.0;
+                for (int_t i = 0; i < np; ++i)
+                {
+                    const real_t firstPosition = firstBegin[i]
+                        + alpha * (firstEnd[i] - firstBegin[i]);
+                    const real_t secondPosition = secondBegin[i]
+                        + alpha * (secondEnd[i] - secondBegin[i]);
+                    const real_t difference = firstPosition - secondPosition;
+                    squared += difference * difference;
+                }
+                minimum = std::min(
+                    minimum,
+                    std::sqrt(squared) - requiredDistance
+                );
+            }
         }
     }
     return minimum;
@@ -2755,27 +2740,32 @@ real_t minimumObstacleClearance(
                 agents[a], circle, options);
             const real_t requiredDistance = obstacleDistanceForCircle(
                 agents[a], geometry, options);
-            std::vector<real_t> position(np, 0.0);
+            const int_t nx = agents[a].model->stateDimension();
+            std::vector<real_t> begin(np, 0.0), end(np, 0.0);
             for (int_t k = 0; k < agents[a].horizon; ++k)
-            for (int_t sample = 0;
-                 sample <= options.collisionSamplesPerInterval;
-                 ++sample)
             {
-                const real_t alpha = static_cast<real_t>(sample)
-                    / options.collisionSamplesPerInterval;
-                interpolatedCollisionPosition(
-                    agents[a], circle, states[a], k, alpha, np, position);
-                for (std::size_t obstacleIndex = 0;
-                     obstacleIndex < obstacles.size();
-                     ++obstacleIndex)
-                    minimum = std::min(
-                        minimum,
-                        projectToPolygon(
-                            position[0],
-                            position[1],
-                            obstacles[obstacleIndex]
-                        ).signedDistance - requiredDistance
-                );
+                worldCollisionPosition(
+                    agents[a], circle, &states[a][k * nx], np, &begin[0]);
+                worldCollisionPosition(
+                    agents[a], circle, &states[a][(k + 1) * nx], np, &end[0]);
+                for (int_t sample = 0;
+                     sample <= options.collisionSamplesPerInterval;
+                     ++sample)
+                {
+                    const real_t alpha = static_cast<real_t>(sample)
+                        / options.collisionSamplesPerInterval;
+                    const real_t x = begin[0] + alpha * (end[0] - begin[0]);
+                    const real_t y = begin[1] + alpha * (end[1] - begin[1]);
+                    for (std::size_t obstacleIndex = 0;
+                         obstacleIndex < obstacles.size();
+                         ++obstacleIndex)
+                        minimum = std::min(
+                            minimum,
+                            projectToPolygon(
+                                x, y, obstacles[obstacleIndex]
+                            ).signedDistance - requiredDistance
+                        );
+                }
             }
         }
     }
@@ -3863,10 +3853,13 @@ NonlinearTurboResult NonlinearTurboADMM::solve(
         options
     );
     result.statistics.objective = trajectoryCost(agents, nominalStates, nominalControls);
-    result.success = !qpFailed && result.statistics.minimumPairwiseClearance >= -options.collisionTolerance
+    result.success = result.statistics.minimumPairwiseClearance >= -options.collisionTolerance
         && result.statistics.minimumObstacleClearance >= -options.collisionTolerance
         && maximumTerminalViolation(agents, nominalStates, options) <= 0.0
         && result.statistics.maximumDynamicsDefect <= options.dynamicsTolerance;
+    if (qpFailed && result.success)
+        result.status =
+            "returning a feasible incumbent after QP restoration exhausted";
     if (result.status.empty())
         result.status = result.converged ? "converged" : (result.success
             ? "maximum SCP iterations reached with a feasible trajectory"

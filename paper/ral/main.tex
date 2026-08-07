@@ -377,22 +377,49 @@ offset, and priority order.
 \subsection{Development Gates}
 The frozen development evidence establishes the intended crossover but is not
 substituted for the untouched final matrix. On \PrimaryCases\ paired scenarios, both
-\method\ and centralized OSQP return independently valid trajectories. The
+\method\ and centralized OSQP return independently valid, strictly converged
+trajectories. The
 median OSQP/\method\ process-wall ratios are $\WallRatioNFour$,
 $\WallRatioNEight$, $\WallRatioNTwelve$, and $\WallRatioNTwenty$ for
-$N=4,8,12,20$, respectively. Exact paired sign tests favor
-\method\ from $N=8$ onward. The maximum absolute objective gap is below the
-predeclared 5\% gate. The current solver revision must additionally pass all
-240 strict-convergence checks before these results are frozen for submission.
+$N=4,8,12,20$, respectively. The crossover occurs near $N=8$ and is
+statistically significant at $N=12$ ($p=\WallSignPNtwelve$) and $N=20$
+($p=\WallSignPNtwenty$). At $N=20$, centralized OSQP uses
+$\MemoryRatioNTwenty\times$ the median peak memory. The maximum absolute
+objective gap is \PrimaryMaximumObjectiveGapPercent\%, below the predeclared
+5\% gate.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/scaling-crossover.pdf}
+\caption{Development scaling on 60 paired cases per team size. Values above
+one favor \method; shading is the interquartile range.}
+\label{fig:scaling}
+\end{figure}
 
 The continuation ablation contains \AblationCases\ common scenarios for each
-distributed variant. Full continuation reduces median runtime by
-\InnerRuntimeReductionPercent\% relative to the inner-only variant and by
-\QPContinuationRuntimeReductionPercent\% relative to QP continuation, while
-reducing local QP solves by \ContinuationQPReductionPercent\%. All three
-variants return valid trajectories. This
-passes the predeclared 20\% novelty-effect target on development data; the
-same comparison will be repeated after the convergence fix is frozen.
+distributed variant. Matrix/working-set continuation reduces median runtime by
+\MatrixContinuationRuntimeReductionPercent\% relative to inner vector
+hotstarts alone. Adding geometry-aware pair-state transport yields a further
+\PairTransportRuntimeReductionPercent\% overall and
+\PairTransportRuntimeReductionNTwentyPercent\% at $N=20$, while reducing the
+median number of local QP solves by \PairTransportQPReductionPercent\%.
+Together, the full cross-SCP continuation stack reduces median runtime by
+\FullContinuationRuntimeReductionPercent\%. Every variant validates and
+strictly converges on all \AblationCases\ cases.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.78\textwidth]{figures/continuation-ablation.pdf}\\[-0.5ex]
+\includegraphics[width=0.82\textwidth]{figures/csdo-repair.pdf}
+\caption{Top: causal continuation ablation on the development matrix,
+isolating matrix/working-set reuse, pair-state transport, and their combined
+cross-SCP effect. Bottom: a representative frozen CSDO-compatible recovery.
+PBS terminates with mutually conflicted centerline trajectories (left);
+starting from that exact artifact and its static corridors, \method\
+negotiates which vehicle enters the bay and returns an independently validated
+plan (right). Circles are CSDO map obstacles and dots are equal-time samples.}
+\label{fig:ablation-recovery}
+\end{figure*}
 
 \subsection{CSDO-Compatible Recovery}
 
@@ -426,17 +453,13 @@ Method-only successes & \CSDOOnlyValid & \TurboOnlyValid \\
 \end{tabular}
 \end{table}
 
-The recorded times do not have identical scope and do not support a runtime-win
-claim. Median \method\ optimizer-process wall time is
-\TurboCSDOMedianWallSeconds~s; median original-CSDO end-to-end process wall
-time is \CSDOMedianWallSeconds~s. CSDO is fast precisely because its
-searched separating planes eliminate all optimization coupling. The result
-instead isolates the cost and benefit of retaining negotiable boundaries when
-the search artifact is locally conflicted. On shared successes, median path
-length is \TurboSharedPathMedianMeters~m for \method\ and
-\CSDOSharedPathMedianMeters~m for CSDO, only a
-\SharedPathReductionPercent\% reduction. We therefore make no broad path
-quality or reduced-conservatism claim from this suite.
+The recorded times do not have identical scope and therefore are not used for
+a runtime comparison. CSDO's searched separating planes eliminate all
+optimization coupling, whereas \method\ retains and negotiates pair
+constraints. This experiment isolates the resulting recovery capability, not
+speed. On shared successes, median path length differs by only
+\SharedPathReductionPercent\%, so we also make no broad reduced-conservatism
+claim from this suite.
 
 \subsection{Required Final Evidence}
 Before submission, the frozen solver must pass: (i) all six headline

@@ -34,6 +34,8 @@ python generate_results_macros.py \
   --evidence-stage development \
   --paired-aggregate <primary>/paired_aggregate.csv \
   --full-vs-inner <ablation>/full_vs_inner_aggregate.csv \
+  --qp-continuation-vs-inner \
+    <ablation>/qp_continuation_vs_inner_aggregate.csv \
   --full-vs-qp-continuation \
     <ablation>/full_vs_qp_continuation_aggregate.csv \
   --csdo-statistics <csdo>/paired_statistics.csv \
@@ -41,15 +43,22 @@ python generate_results_macros.py \
   --output results_macros.tex
 ```
 
-Generate the three benchmark figures only from manifest-locked analysis CSVs:
+The figure generator requires Matplotlib, NumPy, and PyYAML.
+
+Generate the four benchmark figures only from manifest-locked analysis artifacts:
 
 ```bash
 python generate_figures.py \
   --paired-aggregate <primary>/paired_aggregate.csv \
   --full-vs-inner <ablation>/full_vs_inner_aggregate.csv \
+  --qp-continuation-vs-inner \
+    <ablation>/qp_continuation_vs_inner_aggregate.csv \
   --full-vs-qp-continuation \
     <ablation>/full_vs_qp_continuation_aggregate.csv \
   --csdo-statistics <csdo>/paired_statistics.csv \
+  --csdo-recovery-instance <instances>/representative.yaml \
+  --csdo-recovery-root <csdo-case>/root_guesses.yaml \
+  --csdo-recovery-turbo <csdo-case>/turbo.yaml \
   --output-dir <figures>
 ```
 

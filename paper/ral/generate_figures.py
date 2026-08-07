@@ -8,6 +8,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 
 
 COLORS = ("#0072B2", "#D55E00", "#009E73", "#CC79A7")
@@ -107,9 +108,11 @@ def overall_row(rows):
     return matches[0]
 
 
-def ablation_figure(inner_rows, qp_rows, output_dir):
-    rows = [overall_row(inner_rows), overall_row(qp_rows)]
-    labels = ("Inner vector\nhotstart", "QP matrix\ncontinuation")
+def ablation_figure(inner_rows, matrix_rows, qp_rows, output_dir):
+    rows = [overall_row(matrix_rows), overall_row(qp_rows),
+            overall_row(inner_rows)]
+    labels = ("Matrix/WS\ncontinuation", "Pair-state\ntransport",
+              "Full cross-SCP\ncontinuation")
     speedup = np.asarray([
         finite(row, "baseline_over_candidate_wall_median",
                "baseline_over_candidate_median") for row in rows])
@@ -119,13 +122,13 @@ def ablation_figure(inner_rows, qp_rows, output_dir):
     if not np.all(np.isfinite(np.r_[speedup, qp_reduction])):
         raise ValueError("ablation aggregate has missing metrics")
 
-    figure, axes = plt.subplots(1, 2, figsize=(7.0, 2.35),
+    figure, axes = plt.subplots(1, 2, figsize=(7.0, 2.45),
                                 constrained_layout=True)
     x_values = np.arange(len(labels))
     bars = axes[0].bar(x_values, speedup, width=0.58, color=COLORS[0])
     axes[0].axhline(1.0, color="0.35", linewidth=0.8, linestyle="--")
     axes[0].bar_label(bars, fmt="%.2fx", padding=2, fontsize=7)
-    axes[0].set_ylabel("Baseline / full time")
+    axes[0].set_ylabel("Comparison speedup")
     axes[0].set_xticks(x_values, labels)
     axes[0].set_title("Continuation speedup")
     axes[0].set_ylim(0.0, max(speedup) * 1.28)
@@ -139,6 +142,57 @@ def ablation_figure(inner_rows, qp_rows, output_dir):
     axes[1].set_ylim(0.0, max(qp_reduction) * 1.28)
     axes[1].grid(axis="y", color="0.88", linewidth=0.5)
     save_figure(figure, output_dir, "continuation-ablation")
+
+
+def read_yaml(path):
+    with path.open(encoding="utf-8") as stream:
+        return yaml.safe_load(stream)
+
+
+def csdo_repair_figure(instance_path, root_path, turbo_path, output_dir):
+    instance = read_yaml(instance_path)
+    root = read_yaml(root_path)
+    turbo = read_yaml(turbo_path)
+    root_schedule = root.get("schedule", {})
+    turbo_schedule = turbo.get("schedule", {})
+    if not root_schedule or set(root_schedule) != set(turbo_schedule):
+        raise ValueError("CSDO recovery schedules do not contain the same agents")
+
+    figure, axes = plt.subplots(1, 2, figsize=(7.0, 2.45), sharex=True,
+                                sharey=True, constrained_layout=True)
+    panels = (
+        (root_schedule, "(a) Conflicted PBS root: CSDO fails"),
+        (turbo_schedule, "(b) TurboADMM-NL repair: validated"),
+    )
+    for axis, (schedule, title) in zip(axes, panels):
+        for obstacle in instance["map"]["obstacles"]:
+            axis.add_patch(plt.Circle(
+                (float(obstacle[0]), float(obstacle[1])), float(obstacle[2]),
+                facecolor="0.72", edgecolor="0.45", linewidth=0.35))
+        for index, agent in enumerate(sorted(schedule)):
+            states = schedule[agent]
+            x_values = np.asarray([number(state, "x") for state in states])
+            y_values = np.asarray([number(state, "y") for state in states])
+            if not np.all(np.isfinite(np.r_[x_values, y_values])):
+                raise ValueError(f"non-finite trajectory for {agent}")
+            color = COLORS[index]
+            axis.plot(x_values, y_values, color=color, label=agent)
+            axis.scatter(x_values[::3], y_values[::3], s=7, color=color,
+                         edgecolors="none", zorder=3)
+            axis.scatter(x_values[0], y_values[0], s=25, marker="o",
+                         facecolors="white", edgecolors=color, linewidths=1.0,
+                         zorder=4)
+            axis.scatter(x_values[-1], y_values[-1], s=28, marker="*",
+                         color=color, zorder=4)
+        axis.set_xlim(3.5, 26.5)
+        axis.set_ylim(3.0, 11.5)
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_xlabel("x (m)")
+        axis.set_title(title)
+        axis.grid(color="0.9", linewidth=0.4)
+    axes[0].set_ylabel("y (m)")
+    axes[0].legend(frameon=False, loc="upper left", ncol=2)
+    save_figure(figure, output_dir, "csdo-repair")
 
 
 def csdo_figure(rows, output_dir):
@@ -208,8 +262,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paired-aggregate", type=Path, required=True)
     parser.add_argument("--full-vs-inner", type=Path, required=True)
+    parser.add_argument("--qp-continuation-vs-inner", type=Path,
+                        required=True)
     parser.add_argument("--full-vs-qp-continuation", type=Path, required=True)
     parser.add_argument("--csdo-statistics", type=Path, required=True)
+    parser.add_argument("--csdo-recovery-instance", type=Path, required=True)
+    parser.add_argument("--csdo-recovery-root", type=Path, required=True)
+    parser.add_argument("--csdo-recovery-turbo", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     arguments = parser.parse_args()
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
@@ -217,9 +276,13 @@ def main():
     scaling_figure(read_csv(arguments.paired_aggregate), arguments.output_dir)
     ablation_figure(
         read_csv(arguments.full_vs_inner),
+        read_csv(arguments.qp_continuation_vs_inner),
         read_csv(arguments.full_vs_qp_continuation),
         arguments.output_dir)
     csdo_figure(read_csv(arguments.csdo_statistics), arguments.output_dir)
+    csdo_repair_figure(
+        arguments.csdo_recovery_instance, arguments.csdo_recovery_root,
+        arguments.csdo_recovery_turbo, arguments.output_dir)
     print(f"generated figures in {arguments.output_dir}")
 
 

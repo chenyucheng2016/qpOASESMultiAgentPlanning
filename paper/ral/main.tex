@@ -398,6 +398,36 @@ one favor \method; shading is the interquartile range.}
 \label{fig:scaling}
 \end{figure}
 
+\ifdefined\PrimaryQpOASESSuccessNFour
+\begin{table*}[t]
+\caption{Untouched final matrix. Entries are valid trajectories/180 and
+median WSL process wall time in seconds among valid runs.}
+\label{tab:primary-final}
+\centering
+\scriptsize
+\begin{tabular}{c@{\quad}cc@{\quad}cc@{\quad}cc}
+\toprule
+ & \multicolumn{2}{c}{\method} & \multicolumn{2}{c}{OSQP}
+ & \multicolumn{2}{c}{qpOASES} \\
+$N$ & Valid & Wall & Valid & Wall & Valid & Wall \\
+\midrule
+4 & \PrimaryTurboSuccessNFour & \PrimaryTurboWallNFour
+  & \PrimaryOSQPSuccessNFour & \PrimaryOSQPWallNFour
+  & \PrimaryQpOASESSuccessNFour & \PrimaryQpOASESWallNFour \\
+8 & \PrimaryTurboSuccessNEight & \PrimaryTurboWallNEight
+  & \PrimaryOSQPSuccessNEight & \PrimaryOSQPWallNEight
+  & \PrimaryQpOASESSuccessNEight & \PrimaryQpOASESWallNEight \\
+12 & \PrimaryTurboSuccessNTwelve & \PrimaryTurboWallNTwelve
+  & \PrimaryOSQPSuccessNTwelve & \PrimaryOSQPWallNTwelve
+  & \PrimaryQpOASESSuccessNTwelve & \PrimaryQpOASESWallNTwelve \\
+20 & \PrimaryTurboSuccessNTwenty & \PrimaryTurboWallNTwenty
+  & \PrimaryOSQPSuccessNTwenty & \PrimaryOSQPWallNTwenty
+  & \PrimaryQpOASESSuccessNTwenty & \PrimaryQpOASESWallNTwenty \\
+\bottomrule
+\end{tabular}
+\end{table*}
+\fi
+
 The continuation ablation contains \AblationCases\ common scenarios for each
 distributed variant. Matrix/working-set continuation reduces median runtime by
 \MatrixContinuationRuntimeReductionPercent\% relative to inner vector

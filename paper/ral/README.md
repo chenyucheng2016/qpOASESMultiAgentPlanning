@@ -32,6 +32,7 @@ ten-repetition ledger before writing either output:
 python generate_deterministic_results.py \
   <deterministic>/results.csv \
   <deterministic>/execution_status.csv \
+  <deterministic>/run_manifest.json \
   --cases easy_open,easy_single_blocker,medium_doorway,hard_heterogeneous_doorway,hard_warehouse,very_hard_maze \
   --expected-methods full,centralized_osqp,centralized_qpoases,qp_continuation,inner,cold \
   --repetitions 10 \

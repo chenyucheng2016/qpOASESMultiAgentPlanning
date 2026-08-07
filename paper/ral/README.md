@@ -24,6 +24,21 @@ pdflatex -interaction=nonstopmode -halt-on-error main.tex
 pdflatex -interaction=nonstopmode -halt-on-error main.tex
 ```
 
+Generate the timeout-aware deterministic table only after all 360 scheduled
+executions are present. The generator verifies the complete six-method,
+ten-repetition ledger before writing either output:
+
+```bash
+python generate_deterministic_results.py \
+  <deterministic>/results.csv \
+  <deterministic>/execution_status.csv \
+  --cases easy_open,easy_single_blocker,medium_doorway,hard_heterogeneous_doorway,hard_warehouse,very_hard_maze \
+  --expected-methods full,centralized_osqp,centralized_qpoases,qp_continuation,inner,cold \
+  --repetitions 10 \
+  --output-csv <deterministic>/paper_summary.csv \
+  --output-tex deterministic_results.tex
+```
+
 Generate `results_macros.tex` from the manifest-locked analysis CSVs before
 building the manuscript. Use `--evidence-stage development` until the untouched
 final split has been executed; change it to `final` only for the frozen final
@@ -32,6 +47,7 @@ artifacts. The generated file records the SHA-256 digest of every input:
 ```bash
 python generate_results_macros.py \
   --evidence-stage development \
+  --primary-manifest <primary>/run_manifest.json \
   --paired-aggregate <primary>/paired_aggregate.csv \
   --full-vs-inner <ablation>/full_vs_inner_aggregate.csv \
   --qp-continuation-vs-inner \

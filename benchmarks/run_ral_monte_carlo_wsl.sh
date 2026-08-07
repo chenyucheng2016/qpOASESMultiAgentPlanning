@@ -78,6 +78,13 @@ fi
 output_dir=${OUTPUT_DIR:-"${build_dir}/results/${protocol_id}"}
 timeout_seconds=${TIMEOUT_SECONDS:-120}
 
+mkdir -p "$(dirname "${output_dir}")"
+exec 9>"${output_dir}.lock"
+if ! flock -n 9; then
+    echo "another benchmark process is already using ${output_dir}" >&2
+    exit 2
+fi
+
 cmake -S "${repo_root}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DQPOASES_BUILD_EXAMPLES=OFF \

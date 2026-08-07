@@ -52,6 +52,13 @@ output_dir=${OUTPUT_DIR:-"${build_dir}/results/${protocol_id}-${git_commit:0:7}"
 cases=easy_open,easy_single_blocker,medium_doorway,hard_heterogeneous_doorway,hard_warehouse,very_hard_maze
 methods=full,centralized_osqp,centralized_qpoases,qp_continuation,inner,cold
 
+mkdir -p "$(dirname "${output_dir}")"
+exec 9>"${output_dir}.lock"
+if ! flock -n 9; then
+    echo "another benchmark process is already using ${output_dir}" >&2
+    exit 2
+fi
+
 cmake -S "${repo_root}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DQPOASES_BUILD_EXAMPLES=OFF \

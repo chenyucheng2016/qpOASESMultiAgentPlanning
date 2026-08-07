@@ -44,6 +44,14 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def scientific_latex(value):
+    if value == 0.0:
+        return "0"
+    exponent = math.floor(math.log10(abs(value)))
+    coefficient = value / (10.0 ** exponent)
+    return rf"{coefficient:.2f}\times10^{{{exponent}}}"
+
+
 def number(row, field):
     try:
         value = float(row[field])
@@ -239,10 +247,10 @@ def main():
         rf"\newcommand{{\DeterministicRuns}}{{{candidate_expected}}}",
         rf"\newcommand{{\DeterministicStrict}}{{{strict}}}",
         rf"\newcommand{{\DeterministicMaximumObjectiveGapPercent}}{{{max(objective_gaps):.3f}}}",
-        rf"\newcommand{{\DeterministicMinimumPairClearance}}{{{minimum_pair:.2e}}}",
-        rf"\newcommand{{\DeterministicMinimumObstacleClearance}}{{{minimum_obstacle:.2e}}}",
-        rf"\newcommand{{\DeterministicMaximumDynamicsDefect}}{{{maximum_dynamics:.2e}}}",
-        rf"\newcommand{{\DeterministicMaximumTerminalError}}{{{maximum_terminal:.2e}}}",
+        rf"\newcommand{{\DeterministicMinimumPairClearance}}{{{scientific_latex(minimum_pair)}}}",
+        rf"\newcommand{{\DeterministicMinimumObstacleClearance}}{{{scientific_latex(minimum_obstacle)}}}",
+        rf"\newcommand{{\DeterministicMaximumDynamicsDefect}}{{{scientific_latex(maximum_dynamics)}}}",
+        rf"\newcommand{{\DeterministicMaximumTerminalError}}{{{scientific_latex(maximum_terminal)}}}",
         "% Each cell is valid runs/repetitions; median wall time [s] on valid runs.",
         r"\newcommand{\DeterministicTableRows}{%",
         *tex_rows,

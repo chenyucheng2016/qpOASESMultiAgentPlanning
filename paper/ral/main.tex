@@ -12,6 +12,7 @@
 \newcommand{\norm}[1]{\left\lVert #1\right\rVert}
 
 \input{results_macros.tex}
+\IfFileExists{deterministic_results.tex}{\input{deterministic_results.tex}}{}
 \title{TurboADMM-NL: Nested Parametric Continuation for Nonlinear
 Heterogeneous Multi-Agent Trajectory Optimization}
 
@@ -374,6 +375,34 @@ offset, and priority order.
 \label{sec:results}
 % The primary-final tables are intentionally not populated until the solver is
 % frozen and the untouched 720-case split is executed once.
+
+\ifdefined\DeterministicTableRows
+\subsection{Deterministic Stress Tests}
+\begin{table*}[t]
+\caption{Frozen deterministic stress tests. Each entry is valid runs/10;
+median WSL process wall time in seconds among valid runs. Parentheses in the
+scenario column give agents/obstacles.}
+\label{tab:deterministic}
+\centering
+\scriptsize
+\begin{tabular}{lccc}
+\toprule
+Scenario ($N/M$) & \method & OSQP & qpOASES \\
+\midrule
+\DeterministicTableRows
+\bottomrule
+\end{tabular}
+\end{table*}
+\method{} validates and strictly converges on
+\DeterministicStrict/\DeterministicRuns{} runs. Its maximum absolute objective
+gap on jointly valid OSQP outputs is
+\DeterministicMaximumObjectiveGapPercent\%. The maximum terminal error and
+dynamics defect are $\DeterministicMaximumTerminalError$ and
+$\DeterministicMaximumDynamicsDefect$; minimum sampled pair and obstacle
+clearances are $\DeterministicMinimumPairClearance$ and
+$\DeterministicMinimumObstacleClearance$, within the fixed $10^{-2}$
+collision tolerance.
+\fi
 
 \subsection{Development Gates}
 The frozen development evidence establishes the intended crossover but is not

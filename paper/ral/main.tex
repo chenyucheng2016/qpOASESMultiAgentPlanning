@@ -43,6 +43,13 @@ centralized qpOASES and OSQP and isolate each continuation layer. A disjoint
 CSDO-compatible evaluation further tests a complementary property: repairing
 locally conflicted trajectories from a common PBS/Hybrid-A* front end while
 retaining negotiable inter-agent boundaries.
+\ifdefined\PrimaryQpOASESSuccessNFour
+On the untouched \PrimaryCases-case split, \method{} validates every case,
+stays within \PrimaryMaximumObjectiveGapPercent\% of OSQP, and at $N=20$ is
+\WallRatioNTwenty$\times$ faster with \MemoryRatioNTwenty$\times$ lower peak
+memory. It repairs \TurboCSDOSuccesses/\CSDOCases{} CSDO-compatible cases,
+versus \CSDOSuccesses/\CSDOCases{} for original CSDO.
+\fi
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -404,9 +411,15 @@ $\DeterministicMinimumObstacleClearance$, within the fixed $10^{-2}$
 collision tolerance.
 \fi
 
+\ifdefined\PrimaryQpOASESSuccessNFour
+\subsection{Untouched Final Evaluation}
+The untouched final split tests the predeclared structural crossover.
+\else
 \subsection{Development Gates}
 The frozen development evidence establishes the intended crossover but is not
-substituted for the untouched final matrix. On \PrimaryCases\ paired scenarios, both
+substituted for the untouched final matrix.
+\fi
+On \PrimaryCases\ paired scenarios, both
 \method\ and centralized OSQP return independently valid, strictly converged
 trajectories. The
 median OSQP/\method\ process-wall ratios are $\WallRatioNFour$,
@@ -522,6 +535,15 @@ speed. On shared successes, median path length differs by only
 \SharedPathReductionPercent\%, so we also make no broad reduced-conservatism
 claim from this suite.
 
+\ifdefined\PrimaryQpOASESSuccessNFour
+\subsection{Final Protocol Audit}
+The frozen manifest accounts for all $3\times\PrimaryCases$ scheduled
+external-method executions as completions or timeout-censored outcomes. All
+\method{} and OSQP rows are independently valid and strictly converged, the
+objective gate is satisfied, and the generated tables retain every qpOASES
+outcome. Solver and benchmark parameters were not changed after the final split
+was inspected.
+\else
 \subsection{Required Final Evidence}
 Before submission, the frozen solver must pass: (i) all six headline
 deterministic tests and the retained heterogeneous-open overhead control,
@@ -531,6 +553,7 @@ of success, and (iv) one untouched 720-case final run. The final paper tables
 will report success, strict convergence, objective quality, wall and solver
 time, peak memory, SCP/ADMM work, active degree, and centralized/local QP
 dimensions. No parameter may change after the final split is inspected.
+\fi
 
 \section{Limitations}
 \label{sec:limitations}

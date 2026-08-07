@@ -48,6 +48,7 @@ artifacts. The generated file records the SHA-256 digest of every input:
 python generate_results_macros.py \
   --evidence-stage development \
   --primary-manifest <primary>/run_manifest.json \
+  --primary-scale-method-summary <primary>/scale_method_summary.csv \
   --paired-aggregate <primary>/paired_aggregate.csv \
   --full-vs-inner <ablation>/full_vs_inner_aggregate.csv \
   --qp-continuation-vs-inner \

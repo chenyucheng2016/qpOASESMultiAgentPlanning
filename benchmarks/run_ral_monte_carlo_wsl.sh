@@ -125,9 +125,11 @@ if [[ -f "${output_dir}/results.csv" ]]; then
     python3 "${repo_root}/benchmarks/analyze_nonlinear_benchmark.py" \
         "${output_dir}/results.csv" \
         --execution-status "${output_dir}/execution_status.csv" \
+        --inventory "${output_dir}/inventory.csv" \
         --summary "${output_dir}/summary.csv" \
         --enriched "${output_dir}/enriched.csv" \
-        --method-summary "${output_dir}/method_summary.csv"
+        --method-summary "${output_dir}/method_summary.csv" \
+        --scale-method-summary "${output_dir}/scale_method_summary.csv"
     if [[ "${methods}" == *full* && "${methods}" == *centralized_osqp* ]]; then
         python3 "${repo_root}/benchmarks/analyze_ral_paired_scaling.py" \
             "${output_dir}/enriched.csv" \

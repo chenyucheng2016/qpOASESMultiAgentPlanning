@@ -187,6 +187,36 @@ def summarize_methods(rows, status_rows):
     return output
 
 
+def summarize_methods_by_scale(rows, status_rows, inventory_rows):
+    selector_to_agents = {}
+    for row in inventory_rows:
+        selector = f"scenario_{int(row['scenario_index']):03d}"
+        agents = row["n"]
+        if (selector in selector_to_agents
+                and selector_to_agents[selector] != agents):
+            raise ValueError(f"selector {selector} has inconsistent agent counts")
+        selector_to_agents[selector] = agents
+    missing = sorted({
+        row["selector"] for row in status_rows
+        if row["selector"] not in selector_to_agents
+    })
+    if missing:
+        raise ValueError(
+            "cannot assign execution status to an agent-count stratum: "
+            + ", ".join(missing[:10]))
+
+    output = []
+    for agents in sorted(set(selector_to_agents.values()), key=int):
+        scaled_rows = [row for row in rows if row["n"] == agents]
+        scaled_status = [
+            row for row in status_rows
+            if selector_to_agents[row["selector"]] == agents
+        ]
+        for record in summarize_methods(scaled_rows, scaled_status):
+            output.append({"n": agents, **record})
+    return output
+
+
 def enrich_objective_gaps(rows):
     scenario_fields = (
         "suite", "case_id", "family", "density", "composition", "seed",
@@ -232,8 +262,12 @@ def main():
     parser.add_argument("--enriched", default="", help="optional run-level CSV with objective gaps")
     parser.add_argument("--execution-status", default="",
                         help="optional execution_status.csv produced by the matrix runner")
+    parser.add_argument("--inventory", default="",
+                        help="optional scenario inventory produced by the matrix runner")
     parser.add_argument("--method-summary", default="",
                         help="optional output with timeout-aware method aggregates")
+    parser.add_argument("--scale-method-summary", default="",
+                        help="optional timeout-aware method aggregates by agent count")
     arguments = parser.parse_args()
     with open(arguments.input, newline="", encoding="utf-8-sig") as stream:
         rows = list(csv.DictReader(stream))
@@ -243,17 +277,27 @@ def main():
     write_rows(arguments.summary, summary)
     if arguments.enriched:
         write_rows(arguments.enriched, enrich_objective_gaps(rows))
+    status_rows = []
+    if arguments.execution_status:
+        with open(arguments.execution_status, newline="", encoding="utf-8-sig") as stream:
+            status_rows = list(csv.DictReader(stream))
     if arguments.method_summary:
-        status_rows = []
-        if arguments.execution_status:
-            with open(arguments.execution_status, newline="", encoding="utf-8-sig") as stream:
-                status_rows = list(csv.DictReader(stream))
         write_rows(arguments.method_summary, summarize_methods(rows, status_rows))
+    if arguments.scale_method_summary:
+        if not status_rows or not arguments.inventory:
+            parser.error(
+                "--scale-method-summary requires --execution-status and --inventory")
+        with open(arguments.inventory, newline="", encoding="utf-8-sig") as stream:
+            inventory_rows = list(csv.DictReader(stream))
+        write_rows(arguments.scale_method_summary,
+                   summarize_methods_by_scale(rows, status_rows, inventory_rows))
     total_successes = sum(row.get("protocol_success", "0") == "1" for row in rows)
     print(f"rows={len(rows)} successful={total_successes} groups={len(summary)}")
     print(f"summary={arguments.summary}")
     if arguments.method_summary:
         print(f"method_summary={arguments.method_summary}")
+    if arguments.scale_method_summary:
+        print(f"scale_method_summary={arguments.scale_method_summary}")
 
 
 if __name__ == "__main__":

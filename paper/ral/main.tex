@@ -1,4 +1,7 @@
-\documentclass[journal]{IEEEtran}
+\documentclass[letterpaper,10pt,conference]{ieeeconf}
+
+\IEEEoverridecommandlockouts
+\overrideIEEEmargins
 
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
@@ -13,14 +16,16 @@
 
 \input{results_macros.tex}
 \IfFileExists{deterministic_results.tex}{\input{deterministic_results.tex}}{}
-\title{TurboADMM-NL: Nested Parametric Continuation for Nonlinear
+\title{\LARGE \bf TurboADMM-NL: Nested Parametric Continuation for Nonlinear
 Heterogeneous Multi-Agent Trajectory Optimization}
 
-% Update the complete author list and affiliations before submission.
-\author{Yucheng Chen}
+% RA-L initial submissions are double anonymous.
+\author{Anonymous Authors}
 
 \begin{document}
 \maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
 
 \begin{abstract}
 Nonlinear multi-agent trajectory optimization repeatedly solves coupled
@@ -28,8 +33,8 @@ quadratic programs whose temporal dynamics, collision geometry, and active
 constraints evolve gradually. General-purpose centralized solvers do not
 exploit agent separability, while conventional distributed methods repeatedly
 discard useful state at nonlinear relinearization boundaries. This letter
-extends our prior linear-QP solver, TurboADMM, to \method, a shared-memory
-sequential convex programming method for heterogeneous robot teams. The method
+extends the linear-QP solver TurboADMM to \method, a shared-memory sequential
+convex programming method for heterogeneous robot teams. The method
 combines per-agent alternating-direction decomposition with four levels of
 structure reuse: affine Riccati initialization, vector hotstarts within each
 ADMM solve, matrix and working-set continuation across nonlinear
@@ -52,10 +57,10 @@ versus \CSDOSuccesses/\CSDOCases{} for original CSDO.
 \fi
 \end{abstract}
 
-\begin{IEEEkeywords}
+\begin{keywords}
 Multi-robot systems, trajectory optimization, distributed optimization,
 sequential convex programming, ADMM.
-\end{IEEEkeywords}
+\end{keywords}
 
 \section{Introduction}
 \label{sec:introduction}
@@ -69,7 +74,7 @@ The challenge becomes sharper inside sequential convex programming (SCP): an
 ADMM loop solves one convexification, after which changed Jacobians and
 separating planes conventionally trigger another cold optimization.
 
-Our prior work \oldmethod~\cite{Chen2026TurboADMM} addressed a single sequence
+\oldmethod~\cite{Chen2026TurboADMM} addressed a single sequence
 of linearly constrained multi-agent QPs. It combined agent-level ADMM,
 Riccati-based primal-dual initialization, and qpOASES active-set hotstarts.
 That architecture reduced local QP work substantially, but it did not address

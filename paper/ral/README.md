@@ -8,7 +8,9 @@ The results section currently distinguishes development evidence from final
 evidence. Do not remove that distinction until all machine-enforced gates pass
 and the untouched 720-case split has been executed exactly once.
 
-The LaTeX distribution must provide `IEEEtran`, `amsmath`, `booktabs`, `cite`,
+`main.tex` targets the double-anonymous RA-L initial-submission format. The
+official `ieeeconf.cls` from the RA-L template pack is kept beside the source;
+the LaTeX distribution must also provide `amsmath`, `booktabs`, `cite`,
 `graphicx`, and `multirow`. Build with `latexmk` when Perl is available:
 
 ```bash
@@ -85,8 +87,8 @@ from the untouched final artifacts after the solver and protocol are frozen.
 
 Before submission:
 
-1. replace the incomplete author block with the complete author list and
-   affiliations;
+1. keep the initial manuscript double anonymous; populate the complete author
+   list and affiliations only in the accepted journal-format final version;
 2. run and archive the 240-case strict-convergence development gate;
 3. rerun the continuation ablations with the frozen solver;
 4. run the six deterministic cases for ten interleaved repetitions;

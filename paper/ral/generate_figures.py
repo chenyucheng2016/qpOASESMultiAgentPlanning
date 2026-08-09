@@ -41,7 +41,8 @@ def save_figure(figure, output_dir, stem):
 
 def configure_style():
     plt.rcParams.update({
-        "font.family": "serif",
+        "font.family": "STIXGeneral",
+        "mathtext.fontset": "stix",
         "font.size": 8,
         "axes.labelsize": 8,
         "axes.titlesize": 8,
@@ -51,7 +52,6 @@ def configure_style():
         "axes.linewidth": 0.7,
         "lines.linewidth": 1.4,
         "pdf.fonttype": 42,
-        "ps.fonttype": 42,
     })
 
 

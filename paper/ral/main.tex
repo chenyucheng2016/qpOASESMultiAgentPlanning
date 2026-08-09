@@ -125,7 +125,7 @@ coupling into low-dimensional consensus projections.
 
 ADMM provides a standard mechanism for decomposing convex programs with
 coupling constraints~\cite{Boyd2011ADMM}. Multi-agent variants range from
-physically distributed control and DDP architectures~\cite{Saravanos2023DDP}
+physically distributed MPC and DDP architectures~\cite{Luis2020DMPC,Saravanos2023DDP}
 to centralized shared-memory decomposition. The latter is the relevant
 comparison here: communication latency is absent, so performance depends on
 local QP work, parallel scheduling, and the number of consensus rounds.
@@ -134,9 +134,11 @@ parametric active-set hotstarts are complementary for linear multi-agent QPs.
 \method extends that mechanism across nonlinear relinearizations rather than
 claiming a new ADMM splitting.
 
-Recent decentralized planners make different coupling choices. Robust
-MADER~\cite{Kondo2023RobustMADER} optimizes against communicated trajectories
-and explicitly protects asynchronous execution from communication delay.
+Recent decentralized planners make different coupling choices. MADER and
+Robust MADER~\cite{Tordesillas2022MADER,Kondo2023RobustMADER} optimize against
+communicated trajectories, with the latter explicitly protecting asynchronous
+execution from communication delay. EGO-Swarm~\cite{Zhou2021EGOSwarm} couples
+per-agent nonlinear optimization to lightweight topological recovery.
 Spatiotemporal-occupancy methods~\cite{Wu2024SOGM} embed shared trajectories
 into local maps and construct independent safe corridors, while
 MA-DV$^2$F~\cite{Ma2025MADV2F} generates dynamic velocity fields independently
@@ -147,12 +149,14 @@ step, but does not claim communication-delay robustness or feedback-control
 rates.
 
 Sequential convex optimization is widely used to obtain locally optimal
-collision-free trajectories~\cite{Schulman2013TrajOpt}. Its performance and
+collision-free trajectories~\cite{Schulman2013TrajOpt,Mao2016SCvx}. Its performance and
 robustness depend on the reference homotopy, trust-region policy, and recovery
 from temporarily infeasible convexifications. We preserve a nonlinear merit
 test and independently validate every returned trajectory; a feasible
 SCP-limit iterate is reported separately from strict convergence.
 
+Search-then-refine pipelines also smooth conflict-free discrete schedules for
+large quadrotor teams~\cite{Honig2018Swarms}.
 CSDO~\cite{Yang2024CSDO} combines centralized priority-based search (PBS) and
 spatiotemporal Hybrid-A* with decentralized QP refinement. Its separating
 planes and safe corridors are constants derived from the initial guess, so
@@ -385,15 +389,15 @@ offset, and priority order.
 
 \section{Results}
 \label{sec:results}
-% The primary-final tables are intentionally not populated until the solver is
-% frozen and the untouched 720-case split is executed once.
+% Primary results are generated from the frozen, untouched final artifacts.
 
 \ifdefined\DeterministicTableRows
 \subsection{Deterministic Stress Tests}
 \begin{table*}[t]
 \caption{Frozen deterministic stress tests. Each entry is valid runs/10;
 median WSL process wall time in seconds among valid runs. Parentheses in the
-scenario column give agents/obstacles.}
+scenario column give agents/obstacles. The execution cap is 300~s; ``--''
+denotes no valid completion.}
 \label{tab:deterministic}
 \centering
 \scriptsize
@@ -412,8 +416,8 @@ gap on jointly valid OSQP outputs is
 dynamics defect are $\DeterministicMaximumTerminalError$ and
 $\DeterministicMaximumDynamicsDefect$; minimum sampled pair and obstacle
 clearances are $\DeterministicMinimumPairClearance$ and
-$\DeterministicMinimumObstacleClearance$, within the fixed $10^{-2}$
-collision tolerance.
+$\DeterministicMinimumObstacleClearance$, accepted under the validator's fixed
+$10^{-2}$ numerical feasibility tolerance.
 \fi
 
 \ifdefined\PrimaryQpOASESSuccessNFour
@@ -429,12 +433,13 @@ On \PrimaryCases\ paired scenarios, both
 trajectories. The
 median OSQP/\method\ process-wall ratios are $\WallRatioNFour$,
 $\WallRatioNEight$, $\WallRatioNTwelve$, and $\WallRatioNTwenty$ for
-$N=4,8,12,20$, respectively. The crossover occurs near $N=8$ and is
+$N=4,8,12,20$, respectively. The crossover occurs between $N=8$ and $N=12$ and is
 statistically significant at $N=12$ ($p=\WallSignPNtwelve$) and $N=20$
 ($p=\WallSignPNtwenty$). At $N=20$, centralized OSQP uses
-$\MemoryRatioNTwenty\times$ the median peak memory. The maximum absolute
-objective gap is \PrimaryMaximumObjectiveGapPercent\%, below the predeclared
-5\% gate.
+$\MemoryRatioNTwenty\times$ the median peak memory. The median, 95th-percentile,
+and maximum absolute objective gaps are \PrimaryMedianObjectiveGapPercent\%,
+\PrimaryPninetyfiveObjectiveGapPercent\%, and \PrimaryMaximumObjectiveGapPercent\%,
+respectively, below the predeclared 5\% gate.
 
 \begin{figure}[t]
 \centering
@@ -447,8 +452,10 @@ one favor \method; shading is the interquartile range.}
 
 \ifdefined\PrimaryQpOASESSuccessNFour
 \begin{table*}[t]
-\caption{Untouched final matrix. Entries are valid trajectories/180 and
-median WSL process wall time in seconds among valid runs.}
+\caption{Untouched final matrix. Entries are valid trajectories/
+\PrimaryCasesPerScale{} and median WSL process wall time in seconds among valid
+runs. The execution cap is \PrimaryTimeoutSeconds{}~s; ``--'' denotes no valid
+completion.}
 \label{tab:primary-final}
 \centering
 \scriptsize
@@ -584,6 +591,7 @@ than one universal speed claim: structural crossover against centralized QP
 solvers and recovery of locally conflicted search trajectories that fixed
 separating planes cannot negotiate.
 
+\IEEEtriggeratref{5}
 \bibliographystyle{IEEEtran}
 \bibliography{references}
 \end{document}

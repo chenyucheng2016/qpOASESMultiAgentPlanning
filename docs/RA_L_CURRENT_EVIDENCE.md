@@ -1,24 +1,33 @@
 # RA-L current evidence freeze
 
-This file records the current submission evidence after the collision-merit
-optimization. It supersedes older development snapshots in
-`RA_L_BENCHMARK_STATUS.md`; it does not replace the untouched final split.
+This file records the frozen evidence consumed by the submission manuscript.
+It supersedes older development snapshots in `RA_L_BENCHMARK_STATUS.md` and
+includes the single untouched final split.
 
 ## Solver and primary scaling
 
-- Solver commit: `ec3b29d2816530b8f57c9cf02e6b43bf0b16fa79`.
-- WSL test suite: 19/19 passed.
-- Primary development matrix: 240 paired scenarios, with 240/240 independent
-  validations and 240/240 strict convergences for both TurboADMM-NL and
-  centralized OSQP.
-- Maximum absolute objective gap: 4.9835%.
-- Median OSQP/TurboADMM-NL wall ratios at 4, 8, 12, and 20 agents: 0.525,
-  1.057, 1.558, and 2.580.
-- At 20 agents, median peak memory is 126456 KiB for TurboADMM-NL and
-  2249706 KiB for centralized OSQP.
+- Frozen Git commit: `de0ae3d0d492c64a9cdda2978a4acb5867b3dc68`.
+- Release executable SHA-256:
+  `1792050c7849d73903cb82b3fcdc942557742fdd8caa21e6f9192c47decc08c1`.
+- WSL test suite at the frozen executable: 19/19 passed.
+- Untouched final matrix: 720 scenarios and 2160 scheduled executions.
+- TurboADMM-NL: 720/720 completed, independently valid, and strictly
+  converged.
+- Centralized OSQP: 720/720 completed, independently valid, and strictly
+  converged.
+- Centralized qpOASES: 270/720 completed and 450/720 reached the frozen 120 s
+  cap; there were no execution errors or uncensored nonzero exits.
+- Median, 95th-percentile, and maximum absolute TurboADMM-NL/OSQP objective
+  gaps are 0.2143%, 4.4750%, and 4.9903%.
+- Median OSQP/TurboADMM-NL wall ratios at 4, 8, 12, and 20 agents are 0.488,
+  0.928, 1.627, and 2.530.
+- The pooled median wall ratio for N >= 12 is 2.2007 with exact sign-test
+  `p=4.9777e-65`.
+- At 20 agents, median peak memory is 126388 KiB for TurboADMM-NL and
+  2249664 KiB for centralized OSQP, a 17.8x ratio.
 
 Evidence directory:
-`build-ral-wsl/results/ral-primary-development-clean-ec3b29d`.
+`build-ral-wsl/results/ral-monte-carlo-primary-final`.
 
 ## CSDO-compatible recovery
 
@@ -31,7 +40,7 @@ McNemar `p=1.52587890625e-05`.
 Evidence directory:
 `build-ral-wsl/results/csdo_ral/evaluation_passing_bay_ec3b29d`.
 
-## Current continuation ablation
+## Frozen continuation ablation
 
 Data-collection commit `f247a5922b105ba9efaff7fb681c785404737462` ran
 240 scenarios with `full`, `qp_continuation`, and `inner` under one randomized,
@@ -66,8 +75,9 @@ Gate v2 separately requires:
 - 240/240 validity and strict convergence for every variant;
 - at most 5% objective disagreement and paired sign-test `p <= 0.05`.
 
-This gate passes the development evidence. It is frozen before the untouched
-final split is launched. The failed v1 artifact is not overwritten.
+This gate passes the development evidence and was frozen before the untouched
+final split. Its manifest and the final manifest record the same executable and
+runner SHA-256 values. The failed v1 artifact is not overwritten.
 
 Evidence directory:
 `build-ral-wsl/results/ral-continuation-ablation-f247a59`.
@@ -81,16 +91,18 @@ SHA-256 evidence hashes:
 - failed `ablation_gate.json`: `ffdd85e13b4ab753fad3185bf3ee84f2eb5f9a50f368843bd92471f524db604d`
 - passing `ablation_gate_v2.json`: `72888592f008bc918f24a33026301ec8d86aef7c1a139e7c20883e718f1de3ed`
 
-## Remaining submission evidence
+## Completed final protocol
 
-The pre-launch final protocol contains all 720 untouched scenarios and the
-three externally comparable methods: full TurboADMM-NL, centralized OSQP, and
-centralized qpOASES. The cold, inner-only, and QP-continuation variants remain
-in the completed 240-case development ablation; repeating them on the final
-split would not test an additional external-comparison claim. Final mode rejects
-method, scenario, timeout, and protocol overrides.
+Final mode rejected method, scenario, timeout, and protocol overrides. All 2160
+scheduled rows are accounted for by completion or timeout, and the independent
+primary gate passes its success, strict-convergence, objective-quality,
+medium/large crossover, largest-scale speedup, and paired-significance
+requirements. No solver or benchmark parameter changed after the final split
+was inspected.
 
-Before submission, rerun the repeated deterministic protocol on the frozen
-solver, update the manuscript from these current artifacts, and execute the
-untouched 720-scenario final split once. No solver or benchmark parameter may
-change after inspecting that final split.
+SHA-256 evidence hashes:
+
+- `execution_status.csv`: `9914aec9996971ffb1509abb146f02e83313da9a83fb321343f424351ba54eb8`
+- `results.csv`: `002d214776724b674a5bc51dedab8065e51a0f8ed3bfebdf3b102f910b982ab8`
+- `paired_results.csv`: `77a1314bb6716d500f4aa09cec055a3cf8abe635943949f27777b6104b971d12`
+- `run_manifest.json`: `919a41a83a0a852c3c1bf8e3f95378fdc20425ca1a60e53be3fb709b867bbf50`

@@ -285,6 +285,9 @@ def main():
             integer(overall, "candidate_strict_convergences")),
         "PrimaryOSQPStrictConvergences": str(
             integer(overall, "baseline_strict_convergences")),
+        "PrimaryMedianObjectiveGapPercent": f'{number(overall, "candidate_absolute_objective_gap_median_percent"):.3f}',
+        "PrimaryPninetyfiveObjectiveGapPercent": f'{number(overall, "candidate_absolute_objective_gap_p95_percent"):.3f}',
+        "PrimaryTimeoutSeconds": f'{number(configuration, "timeout_seconds"):.0f}',
         "PrimaryMaximumObjectiveGapPercent": f'{number(overall, "candidate_absolute_objective_gap_max_percent"):.3f}',
         "WallRatioNFour": f'{number(scale[4], "baseline_over_candidate_wall_median"):.3f}',
         "WallRatioNEight": f'{number(scale[8], "baseline_over_candidate_wall_median"):.3f}',

@@ -4,9 +4,9 @@ This directory contains the working RA-L manuscript. The paper deliberately
 positions TurboADMM-NL as an extension of TurboADMM rather than an unrelated
 planner.
 
-The results section currently distinguishes development evidence from final
-evidence. Do not remove that distinction until all machine-enforced gates pass
-and the untouched 720-case split has been executed exactly once.
+The results section consumes the frozen final primary evidence. The 240-case
+development ablation remains a separate causal study and is not relabeled as
+untouched final evidence.
 
 `main.tex` targets the double-anonymous RA-L initial-submission format. The
 official `ieeeconf.cls` from the RA-L template pack is kept beside the source;
@@ -43,13 +43,13 @@ python generate_deterministic_results.py \
 ```
 
 Generate `results_macros.tex` from the manifest-locked analysis CSVs before
-building the manuscript. Use `--evidence-stage development` until the untouched
-final split has been executed; change it to `final` only for the frozen final
-artifacts. The generated file records the SHA-256 digest of every input:
+building the manuscript. The submission build uses `--evidence-stage final`
+and the untouched 720-case primary artifacts. The generated file rejects an
+incomplete protocol and records the SHA-256 digest of every input:
 
 ```bash
 python generate_results_macros.py \
-  --evidence-stage development \
+  --evidence-stage final \
   --primary-manifest <primary>/run_manifest.json \
   --primary-scale-method-summary <primary>/scale_method_summary.csv \
   --paired-aggregate <primary>/paired_aggregate.csv \
@@ -82,8 +82,9 @@ python generate_figures.py \
   --output-dir <figures>
 ```
 
-Development figures are for layout and analysis checks only. Regenerate them
-from the untouched final artifacts after the solver and protocol are frozen.
+The committed scaling figure is generated from the untouched final primary
+artifacts. The continuation and CSDO figures remain tied to their separately
+frozen development-ablation and disjoint-evaluation artifacts.
 
 Before submission:
 
@@ -100,5 +101,6 @@ Before submission:
 9. verify every numerical claim against the generated tables; and
 10. compile, render, and visually inspect the complete PDF.
 
-The current manuscript is a technical draft, not a submission artifact. It
-contains no fabricated final numbers; the final primary results remain locked.
+All numerical manuscript inputs are generated from manifest-locked evidence.
+A submission artifact is complete only after the final clean build, numerical
+audit, anonymity audit, and rendered-page inspection pass.
